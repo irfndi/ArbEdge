@@ -9,7 +9,7 @@ import type {
 import type { TelegramService } from "./telegramService";
 import type { ExchangeService } from "./exchangeService";
 import { pRateLimit } from "p-ratelimit";
-import * as ccxt from "ccxt";
+import type * as ccxt from "ccxt";
 
 const limit = pRateLimit({
   interval: 1000,
@@ -85,19 +85,23 @@ export class OpportunityService implements IOpportunityService {
    * @param threshold - The minimum absolute funding rate difference required to identify an opportunity.
    * @returns A promise that resolves to an array of identified ArbitrageOpportunity objects.
    */
-  async findOpportunities(
+  public async findOpportunities(
     exchangeIds: ExchangeId[],
     pairs: TradingPairSymbol[],
     threshold: number
   ): Promise<ArbitrageOpportunity[]> {
-    this.logger.debug("Finding opportunities", {
+    console.log("[TELEGRAM_TEST_DEBUG] findOpportunities called with:", {
       exchangeIds,
       pairs,
       threshold,
     });
-
-    // Step 1 from Spec (modified): Prepare for fetching.
-    // Data will be fetched and stored as per spec steps 2 & 3 later.
+    const opportunities: ArbitrageOpportunity[] = [];
+    if (exchangeIds.length < 2) {
+      this.logger.warn(
+        "Skipping findOpportunities: Not enough exchanges to compare."
+      );
+      return opportunities;
+    }
 
     const fundingRateData = new Map<
       TradingPairSymbol,
@@ -108,7 +112,6 @@ export class OpportunityService implements IOpportunityService {
       Map<ExchangeId, ccxt.TradingFeeInterface | null>
     >(); // Assuming ccxt.TradingFeeInterface contains taker fee
 
-    // Step 2 & 3 from Spec: Concurrently fetch and store data
     const fetchPromises: Promise<void>[] = [];
 
     for (const pair of pairs) {
@@ -168,23 +171,139 @@ export class OpportunityService implements IOpportunityService {
 
     await Promise.all(fetchPromises);
 
-    this.logger.debug("All funding rates and trading fees fetched.");
+    console.log(
+      "[TELEGRAM_TEST_DEBUG] All funding rates and trading fees fetched."
+    );
 
-    const opportunities: ArbitrageOpportunity[] = [];
+    // Step 3.5 (New): Get general fee status for all involved exchanges
+    const exchangeFeeStatus = new Map<ExchangeId, { isFeeFree: boolean }>();
+    const allExchangeIdsInvolved = new Set<ExchangeId>();
+    for (const exchangeId of exchangeIds) {
+      try {
+        const instance =
+          await this.exchangeService.getExchangeInstance(exchangeId);
+        console.log(
+          `[TELEGRAM_TEST_DEBUG] Fetched CCXT instance for ${exchangeId} for general fee status:`,
+          instance !== null
+        );
+        if (instance && instance.fees?.trading?.taker === 0) {
+          exchangeFeeStatus.set(exchangeId, { isFeeFree: true });
+          this.logger.debug(
+            `Exchange ${exchangeId} identified as generally fee-free.`
+          );
+          console.log(
+            `[TELEGRAM_TEST_DEBUG] ${exchangeId} is generally FEE-FREE.`
+          );
+        } else {
+          exchangeFeeStatus.set(exchangeId, { isFeeFree: false });
+          if (instance && instance.fees?.trading?.taker !== undefined) {
+            this.logger.debug(
+              `Exchange ${exchangeId} is not generally fee-free. Default taker fee: ${instance.fees.trading.taker}`
+            );
+            console.log(
+              `[TELEGRAM_TEST_DEBUG] ${exchangeId} not generally fee-free. Default taker: ${instance.fees.trading.taker}`
+            );
+          } else if (instance) {
+            this.logger.debug(
+              `Exchange ${exchangeId} has no general trading fee info or taker fee is undefined.`
+            );
+            console.log(
+              `[TELEGRAM_TEST_DEBUG] ${exchangeId} no general trading fee info or taker undefined.`
+            );
+          } else {
+            this.logger.warn(
+              `Could not retrieve CCXT instance for ${exchangeId} to check general fee status.`
+            );
+            console.log(
+              `[TELEGRAM_TEST_DEBUG] Could not retrieve CCXT instance for ${exchangeId} (general fee check).`
+            );
+          }
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to get exchange instance or fees for ${exchangeId} during general fee check`,
+          { exchangeId, error }
+        );
+        console.error(
+          `[TELEGRAM_TEST_DEBUG] Error getting instance/fees for ${exchangeId} (general fee check):`,
+          error
+        );
+        exchangeFeeStatus.set(exchangeId, { isFeeFree: false }); // Assume not fee-free on error
+      }
+    }
+    console.log(
+      "[TELEGRAM_TEST_DEBUG] exchangeFeeStatus map populated:",
+      JSON.stringify(Array.from(exchangeFeeStatus.entries()))
+    );
 
-    // Step 4 from Spec: Identify Opportunities
-    for (const pair of pairs) {
-      const pairFundingRates = fundingRateData.get(pair);
-      const pairTradingFees = tradingFeeData.get(pair);
+    const pairFundingRates = new Map<TradingPairSymbol, FundingRateInfo[]>();
+    const pairTradingFees = new Map<
+      TradingPairSymbol,
+      Map<ExchangeId, ccxt.TradingFeeInterface | null>
+    >();
 
-      if (!pairFundingRates || !pairTradingFees) {
-        this.logger.warn(`Missing data for pair ${pair}, skipping.`);
+    // Step 3.75: Populate pairFundingRates and pairTradingFees from fetched data
+    for (const [pair, ratesMap] of fundingRateData.entries()) {
+      const validRates = Array.from(ratesMap.values()).filter(
+        (rate): rate is FundingRateInfo => rate !== null
+      );
+      if (validRates.length > 0) {
+        pairFundingRates.set(pair, validRates);
+      }
+    }
+    for (const [pair, feesMap] of tradingFeeData.entries()) {
+      pairTradingFees.set(pair, feesMap);
+    }
+
+    // Step 4: Iterate through pairs and then through combinations of exchanges for each pair
+    for (const [pair, ratesForPair] of pairFundingRates.entries()) {
+      console.log(
+        `[TELEGRAM_TEST_DEBUG] Processing pair from pairFundingRates: ${pair} with ${ratesForPair.length} rates.`
+      );
+
+      const uniqueRates = Array.from(
+        new Set(ratesForPair.map((r) => r.fundingRate))
+      );
+      if (uniqueRates.length < 2) {
+        this.logger.warn(
+          `Skipping ${pair} as it does not have at least two different funding rates among the provided exchanges.`
+        );
+        console.log(
+          `[TELEGRAM_TEST_DEBUG] Skipping ${pair} - unique rates: ${uniqueRates.length}`
+        );
         continue;
       }
 
-      const availableExchanges = Array.from(pairFundingRates.keys()).filter(
-        (exchangeId) => pairFundingRates.get(exchangeId) !== null // Ensure rate info exists
+      const sortedRates = [...ratesForPair].sort(
+        (a, b) => a.fundingRate - b.fundingRate
       );
+      console.log(
+        `[TELEGRAM_TEST_DEBUG] Pair: ${pair}, SortedRates: ${JSON.stringify(sortedRates.map((r) => ({ ex: r.exchange, rate: r.fundingRate })))}`
+      );
+
+      // Filter exchanges based on availability of funding rates AND fees (or if exchange is fee-free)
+      const availableExchanges = sortedRates
+        .map((r) => r.exchange)
+        .filter((exchangeId) => {
+          const hasFundingRate =
+            ratesForPair.find((r) => r.exchange === exchangeId) !== undefined;
+          if (!hasFundingRate) return false;
+
+          const hasSpecificFee =
+            pairTradingFees.get(pair)?.get(exchangeId) !== null &&
+            pairTradingFees.get(pair)?.get(exchangeId) !== undefined;
+          const isGenerallyFeeFree =
+            exchangeFeeStatus.get(exchangeId)?.isFeeFree === true;
+
+          if (hasSpecificFee || isGenerallyFeeFree) {
+            return true;
+          }
+
+          this.logger.debug(
+            `Excluding ${exchangeId} for pair ${pair}: Funding rate present but no specific fee info and not generally fee-free.`
+          );
+          return false;
+        });
 
       if (availableExchanges.length < 2) {
         this.logger.debug(
@@ -198,27 +317,31 @@ export class OpportunityService implements IOpportunityService {
           const exchangeA = availableExchanges[i];
           const exchangeB = availableExchanges[j];
 
-          const fundingRateInfoA = pairFundingRates.get(exchangeA);
-          const fundingRateInfoB = pairFundingRates.get(exchangeB);
+          const fundingRateInfoA = ratesForPair.find(
+            (r) => r.exchange === exchangeA
+          );
+          const fundingRateInfoB = ratesForPair.find(
+            (r) => r.exchange === exchangeB
+          );
 
           // Spec 4.b.i.3: If fundingRateInfoA or fundingRateInfoB is null, continue.
           // This is already handled by availableExchanges filter, but double check for safety.
           if (!fundingRateInfoA || !fundingRateInfoB) {
             this.logger.warn(
-              `Missing funding rate info for ${pair} on ${exchangeA} or ${exchangeB} despite pre-filter. Skipping.`
+              `Logic error: Missing funding rate info for ${pair} on ${exchangeA} or ${exchangeB} despite pre-filter. Skipping.`
             );
             continue;
           }
 
-          const tradingFeesA = pairTradingFees.get(exchangeA);
-          const tradingFeesB = pairTradingFees.get(exchangeB);
+          const tradingFeesA = pairTradingFees.get(pair)?.get(exchangeA);
+          const tradingFeesB = pairTradingFees.get(pair)?.get(exchangeB);
 
           // Spec 4.b.i.4: Determine long and short exchange
-          let longExchange: ExchangeId,
-            shortExchange: ExchangeId,
-            longRate: number,
-            shortRate: number,
-            longRateTimestamp: number;
+          let longExchange: ExchangeId;
+          let shortExchange: ExchangeId;
+          let longRate: number;
+          let shortRate: number;
+          let longRateTimestamp: number;
 
           if (fundingRateInfoA.fundingRate <= fundingRateInfoB.fundingRate) {
             longExchange = exchangeA;
@@ -251,48 +374,77 @@ export class OpportunityService implements IOpportunityService {
             fundingRateInfoA.fundingRate - fundingRateInfoB.fundingRate
           );
 
-          // Spec 4.b.i.6 & 7: Determine taker fee rates.
-          const feeInfoLong =
-            longExchange === exchangeA ? tradingFeesA : tradingFeesB;
-          const feeInfoShort =
-            shortExchange === exchangeA ? tradingFeesA : tradingFeesB;
+          // Determine fee rates based on the refined logic
+          let feeRateLong: number = Number.NaN;
+          let feeRateShort: number = Number.NaN;
 
-          // Stricter fee handling as per spec:
-          // If fee information is missing (null/undefined) for either exchange, skip this combination.
-          // Assumes no "fee-free" configuration exists yet.
-          if (
-            !feeInfoLong ||
-            typeof feeInfoLong.taker !== "number" ||
-            !feeInfoShort ||
-            typeof feeInfoShort.taker !== "number"
-          ) {
-            this.logger.warn(
-              `Skipping opportunity for ${pair} between ${longExchange} and ${shortExchange} due to missing fee information.`,
-              {
-                feeInfoLong,
-                feeInfoShort,
-              }
-            );
-            continue; // Skip this specific exchange pair combination
-          }
+          const assignFees = (longEx: ExchangeId, shortEx: ExchangeId) => {
+            const longFeeInfo = pairTradingFees.get(pair)?.get(longEx);
+            if (
+              longFeeInfo?.taker !== undefined &&
+              longFeeInfo?.taker !== null
+            ) {
+              feeRateLong = longFeeInfo.taker;
+            } else if (exchangeFeeStatus.get(longEx)?.isFeeFree) {
+              feeRateLong = 0;
+            } else {
+              this.logger.error(
+                `Critical: Fee cannot be determined for longExchange ${longEx} on ${pair}.`
+              );
+              feeRateLong = Number.NaN;
+            }
 
-          const longExchangeTakerFeeRate = feeInfoLong.taker;
-          const shortExchangeTakerFeeRate = feeInfoShort.taker;
+            const shortFeeInfo = pairTradingFees.get(pair)?.get(shortEx);
+            if (
+              shortFeeInfo?.taker !== undefined &&
+              shortFeeInfo?.taker !== null
+            ) {
+              feeRateShort = shortFeeInfo.taker;
+            } else if (exchangeFeeStatus.get(shortEx)?.isFeeFree) {
+              feeRateShort = 0;
+            } else {
+              this.logger.error(
+                `Critical: Fee cannot be determined for shortExchange ${shortEx} on ${pair}.`
+              );
+              feeRateShort = Number.NaN;
+            }
+          };
 
-          // Spec 4.b.i.8: Calculate totalEstimatedFees
-          const totalEstimatedFees =
-            longExchangeTakerFeeRate + shortExchangeTakerFeeRate;
+          assignFees(longExchange, shortExchange);
+          console.log(
+            `[TELEGRAM_TEST_DEBUG] Pair: ${pair}, LongEx: ${longExchange}, ShortEx: ${shortExchange}, feeRateLong: ${feeRateLong}, feeRateShort: ${feeRateShort}`
+          );
 
-          // Spec 4.b.i.9: Calculate netRateDifference
-          // Using specRateDifference (gross, always positive)
+          // Spec 4.b.i.6: Calculate totalEstimatedFees
+          const totalEstimatedFees = feeRateLong + feeRateShort;
+
+          // Spec 4.b.i.7: Calculate netRateDifference
           const netRateDifference = specRateDifference - totalEstimatedFees;
 
-          // Spec 4.b.i.10: If netRateDifference >= threshold (and positive)
-          // The spec says "netRateDifference > 0 && netRateDifference >= threshold".
-          // If threshold can be 0 or negative, `netRateDifference > 0` is important.
-          // If threshold is always positive, `netRateDifference >= threshold` implies `> 0`.
-          // Assuming threshold is a positive value representing minimum profit.
-          if (netRateDifference >= threshold && shortRate > longRate) {
+          console.log(
+            `[TELEGRAM_TEST_DEBUG] Pair: ${pair}, Gross: ${rateDifference}, Fees: ${totalEstimatedFees}, Net: ${netRateDifference}, Threshold: ${threshold}`
+          );
+
+          // Spec 4.b.i.8: Check Opportunity Condition
+          // The condition is: netRateDifference >= threshold AND shortRate > longRate
+          // The shortRate > longRate is implicitly handled by how long/short exchanges are determined
+          // and how rateDifference is calculated (shortRate - longRate which would be negative otherwise).
+          // However, the specRateDifference = Math.abs(...) was introduced.
+          // Let's ensure the original rateDifference (shortRate - longRate) is used for the actual check.
+
+          const actualProfitPotentialDirection = shortRate - longRate; // This should be positive if shortRate > longRate
+
+          if (
+            netRateDifference >= threshold &&
+            actualProfitPotentialDirection > 0 // Explicitly check direction, though netRateDifference relies on absolute.
+            // The spec's condition `shortRate > longRate` ensures this.
+            // If long/short assignment is correct, this condition is inherently met
+            // when `specRateDifference` (based on absolute) minus fees is positive.
+            // Let's use the simpler condition from the previous implementation
+            // if netRateDifference >= threshold, given that long/short are already decided.
+            // The spec says: "netRateDifference >= Config.threshold AND Short Exchange Funding Rate > Long Exchange Funding Rate"
+            // Our `shortRate` and `longRate` variables already respect this.
+          ) {
             const opportunity: ArbitrageOpportunity = {
               pair: pair,
               longExchange,
@@ -300,8 +452,8 @@ export class OpportunityService implements IOpportunityService {
               longRate,
               shortRate,
               rateDifference: specRateDifference,
-              longExchangeTakerFeeRate,
-              shortExchangeTakerFeeRate,
+              longExchangeTakerFeeRate: feeRateLong,
+              shortExchangeTakerFeeRate: feeRateShort,
               totalEstimatedFees,
               netRateDifference,
               timestamp: longRateTimestamp,
@@ -335,17 +487,14 @@ export class OpportunityService implements IOpportunityService {
   async monitorOpportunities(
     threshold: number
   ): Promise<ArbitrageOpportunity[]> {
-    const exchangeIds = this.exchanges;
-    const pairs = this.monitoredPairs.map((p) => p.symbol);
-    const opportunities = await this.findOpportunities(
-      exchangeIds,
-      pairs,
+    // Implementation for continuous monitoring will go here
+    this.logger.info("monitorOpportunities called", { threshold });
+    // For now, let's just call findOpportunities once as a placeholder
+    return this.findOpportunities(
+      this.exchanges,
+      this.monitoredPairs.map((p) => p.symbol),
       threshold
     );
-    this.logger.info(
-      `monitorOpportunities found ${opportunities.length} opportunities with threshold ${threshold}.`
-    );
-    return opportunities;
   }
 
   /**
@@ -356,20 +505,25 @@ export class OpportunityService implements IOpportunityService {
   async processOpportunities(
     opportunities: ArbitrageOpportunity[]
   ): Promise<void> {
-    this.logger.info(`Processing ${opportunities.length} opportunities...`);
-    if (opportunities.length > 0) {
-      for (const op of opportunities) {
-        this.logger.log(
-          "info",
-          `Opportunity details: ${JSON.stringify(op, null, 2)}`
-        );
+    if (this.telegramService) {
+      for (const opp of opportunities) {
+        try {
+          await this.telegramService.sendOpportunityNotification(opp);
+        } catch (e) {
+          console.log(
+            "[TELEGRAM_TEST_DEBUG] Entered CATCH block in processOpportunities for OpportunityService"
+          ); // Added log
+          this.logger.error(
+            "Error sending opportunity notification via Telegram from OpportunityService",
+            {
+              // biome-ignore lint/suspicious/noExplicitAny: Error object can be of any type
+              error: e as any,
+              opportunityPair: opp.pair, // Using a distinct field name
+            }
+          );
+        }
       }
-      // Potentially, further actions like sending consolidated reports or storing them.
     }
-    // If a TelegramService is configured, it's already sending notifications
-    // per opportunity within findOpportunities. This method could be used for summaries
-    // or other types of processing.
-    this.logger.info("Finished processing opportunities.");
   }
 
   // Helper methods can be added here

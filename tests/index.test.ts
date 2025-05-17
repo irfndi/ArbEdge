@@ -7,7 +7,8 @@ import {
   beforeEach,
   afterEach,
   type Mock,
-  type DeepMockProxy,
+  // type DeepMockProxy, // Comment out if not used or if vitest-mock-extended is not a dep.
+  // If it is a dep and used: import type { DeepMockProxy } from 'vitest-mock-extended';
 } from "vitest";
 import type { Router, error, json } from "itty-router"; // Types, as they are not used as values in this file
 import type { IRequest, RouterType } from "itty-router"; // Types
@@ -69,7 +70,7 @@ enum LogLevel {
 }
 
 vi.mock("../src/services/TelegramService", () => ({
-  TelegramService: vi.fn().mockImplementation((env, ctx, logger) => ({
+  TelegramService: vi.fn().mockImplementation((env, ctx, loggerInput) => ({
     sendMessage: vi.fn().mockResolvedValue(undefined),
     sendMessages: vi.fn().mockResolvedValue(undefined),
     sendOpportunityNotification: vi.fn().mockResolvedValue(undefined),
@@ -77,13 +78,15 @@ vi.mock("../src/services/TelegramService", () => ({
     findArbitrageOpportunities: vi.fn().mockResolvedValue([]),
     processFundingRateOpportunities: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(),
-    logger: logger || createMockLogger(),
+    logger: createMockLogger(),
   })),
 }));
 
 vi.mock("../src/services/OpportunityService", () => ({
-  OpportunityService: vi.fn().mockImplementation((env, logger) => ({
+  OpportunityService: vi.fn().mockImplementation((env, loggerInput) => ({
     calculateArbitrage: vi.fn().mockResolvedValue(null),
+    findOpportunities: vi.fn().mockResolvedValue([]),
+    logger: createMockLogger(),
   })),
 }));
 
@@ -121,6 +124,10 @@ interface MockLogger extends LoggerInterface {
   silly?: Mock<(message: string, ...meta: unknown[]) => void>;
   child?: Mock<(options: Record<string, unknown>) => MockLogger>;
   setLogLevel?: (level: LogLevel) => void;
+
+  // Add addError and addContext as optional Mock types
+  addError?: Mock<(error: Error, ...meta: unknown[]) => void>;
+  addContext?: Mock<(key: string, value: unknown) => void>;
 }
 
 const mockRequest = (method: string, url: string, body?: unknown): Request => {
@@ -138,14 +145,14 @@ const createMockLogger = (): MockLogger => ({
   warn: vi.fn(),
   error: vi.fn(),
   log: vi.fn(),
-  // Optional methods - provide mock impl if used in tests
   http: vi.fn(),
   verbose: vi.fn(),
   silly: vi.fn(),
-  child: vi.fn().mockImplementation(() => createMockLogger()), // Example: child returns a new mock logger
-  // From LoggerInterface definition (not Winston specific properties like 'level')
-  // Assuming LoggerInterface does not directly have 'logLevel' as a property, but might have setLogLevel
+  child: vi.fn().mockImplementation(() => createMockLogger()),
   setLogLevel: vi.fn(),
+  // Add mock implementations for addError and addContext
+  addError: vi.fn(),
+  addContext: vi.fn(),
 });
 
 const actualMockLoggerInstance = createMockLogger(); // Define actual instance here
@@ -156,8 +163,8 @@ vi.mock("../src/utils/logger", () => ({
 }));
 
 let mockLoggerInstance: MockLogger;
-let mockEnv: TestEnv; // Restore global mockEnv
-let mockExecutionContext: ExecutionContext; // Restore global mockExecutionContext
+let mockEnv: TestEnv; // Uses TestEnv type
+let mockExecutionContext: ExecutionContext;
 
 type MockKVNamespaceGetOptionsType = "text" | "json" | "arrayBuffer" | "stream";
 interface MockKVNamespaceGetOptions {
@@ -357,18 +364,86 @@ const createSimpleMockKvNamespace = (): KVNamespace => {
       return convertValue(valueEntry.value as string, "stream");
     },
 
-    // Minimal mock for getWithMetadata to satisfy the interface
-    async getWithMetadata(key: string, optionsOrType?: any): Promise<any> {
-      console.warn(
-        `Mock KV: getWithMetadata for key '${key}' called but not fully implemented, returning default nulls.`
-      );
-      return {
-        value: null,
-        metadata: null,
-        cacheStatus: null, // if your mock's KVGetWithMetadataResult includes this
-      };
-    },
+    // Corrected getWithMetadata signature and implementation
+    getWithMetadata: vi.fn().mockImplementation(
+      async <Value = unknown, Metadata = unknown>(
+        key: string,
+        // Use a type that covers the expected options for getWithMetadata
+        optionsOrType?:
+          | "text"
+          | "json"
+          | "arrayBuffer"
+          | "stream"
+          | Partial<KVNamespaceGetOptions<undefined>>
+      ): Promise<KVNamespaceGetWithMetadataResult<Value, Metadata>> => {
+        const entry = store.get(key);
+        let type: "text" | "json" | "arrayBuffer" | "stream" = "json"; // Default type
 
+        if (typeof optionsOrType === "string") {
+          type = optionsOrType;
+        } else if (
+          optionsOrType &&
+          typeof optionsOrType === "object" &&
+          optionsOrType.type
+        ) {
+          const validTypes: Array<"text" | "json" | "arrayBuffer" | "stream"> =
+            ["text", "json", "arrayBuffer", "stream"];
+          const optionType = optionsOrType.type as string;
+          // biome-ignore lint/suspicious/noExplicitAny: Practical way to use string with Array.includes for union type
+          if (validTypes.includes(optionType as any)) {
+            type = optionType as typeof type;
+          }
+        }
+
+        if (!entry) {
+          return { value: null, metadata: null, cacheStatus: "MISS" };
+        }
+
+        let returnValue: Value;
+        switch (type) {
+          case "text":
+            returnValue = entry.value as string as unknown as Value;
+            break;
+          case "json":
+            try {
+              returnValue = JSON.parse(entry.value as string) as Value;
+            } catch (e) {
+              // Handle JSON parsing error, maybe return null or throw
+              console.error("Mock KV JSON parse error:", e);
+              return {
+                value: null,
+                metadata: (entry.metadata as Metadata) || null,
+                cacheStatus: "MISS",
+              }; // Or some error state
+            }
+            break;
+          case "arrayBuffer":
+            // Mock conversion - in reality, this would be an ArrayBuffer
+            returnValue = new TextEncoder().encode(entry.value as string)
+              .buffer as unknown as Value;
+            break;
+          case "stream": {
+            // Fix for Line 421: Wrap case in block and type streamValue more safely
+            const streamValue = entry.value as string; // Assuming entry.value is a string to be streamed
+            returnValue = new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(streamValue));
+                controller.close();
+              },
+            }) as unknown as Value;
+            break;
+          }
+          default:
+            // Should not happen if type logic is correct
+            returnValue = entry.value as unknown as Value;
+        }
+        return {
+          value: returnValue,
+          metadata: (entry.metadata as Metadata) || null,
+          cacheStatus: "HIT",
+        };
+      }
+    ),
     async put(
       key: string,
       valueToPut: string | ArrayBuffer | ArrayBufferView | ReadableStream,
@@ -509,9 +584,32 @@ const createMockDurableObjectNamespace = (): DurableObjectNamespace => ({
   ),
 });
 
-beforeEach(() => {
-  // Clear calls to mock constructors before each test
-  vi.clearAllMocks();
+beforeEach(async () => {
+  vi.clearAllMocks(); // Moved from original position, good practice
+  mockLoggerInstance = createMockLogger();
+  mockExecutionContext = cfCreateExecutionContext();
+
+  const {
+    LOGGER: _cfLogger,
+    ArbEdgeKV: _cfKV,
+    POSITIONS: _cfDO,
+    ...restOfCfTestEnv
+  } = cfTestEnv as Partial<ImportedEnv>;
+
+  mockEnv = {
+    LOG_LEVEL: "info",
+    TELEGRAM_BOT_TOKEN: "test_bot_token",
+    TELEGRAM_CHAT_ID: "test_chat_id",
+    EXCHANGES: "binance,kraken",
+    MONITORED_PAIRS_CONFIG: JSON.stringify([
+      { symbol: "BTC/USDT", base: "BTC", quote: "USDT", type: "swap" },
+    ]),
+    ARBITRAGE_THRESHOLD: "0.1",
+    LOGGER: mockLoggerInstance, // Explicitly MockLogger
+    ArbEdgeKV: createSimpleMockKvNamespace(), // Explicitly our mock KV
+    POSITIONS: createMockDurableObjectNamespace(), // Explicitly our mock DO
+    ...restOfCfTestEnv, // Spread the rest of cfTestEnv
+  };
 
   // Reset mock implementations for services
   (TelegramService as unknown as Mock).mockImplementation(
@@ -539,53 +637,6 @@ beforeEach(() => {
       (mockFn as Mock).mockClear();
     }
   }
-
-  // Create a new mock environment with required properties
-  const mockKv = createSimpleMockKvNamespace();
-  const mockDo = createMockDurableObjectNamespace();
-
-  // Initialize the mock environment with required properties
-  mockEnv = {
-    // Required environment variables
-    LOG_LEVEL: "info",
-    TELEGRAM_BOT_TOKEN: "test-token",
-    TELEGRAM_CHAT_ID: "test-chat-id",
-    EXCHANGES: "binance,bybit",
-    MONITORED_PAIRS_CONFIG: JSON.stringify([
-      { symbol: "BTC/USDT", base: "BTC", quote: "USDT", type: "spot" },
-    ]),
-    ARBITRAGE_THRESHOLD: "0.5",
-
-    // Services
-    LOGGER: mockLoggerInstance,
-    ArbEdgeKV: createSimpleMockKvNamespace(), // Type assertion to handle mock
-    POSITIONS: mockDo as unknown as DurableObjectNamespace, // Type assertion to handle mock
-
-    // Spread any existing mockEnv properties that aren't being overridden
-    ...Object.fromEntries(
-      Object.entries(mockEnv || {}).filter(
-        ([key]) =>
-          ![
-            "LOG_LEVEL",
-            "TELEGRAM_BOT_TOKEN",
-            "TELEGRAM_CHAT_ID",
-            "EXCHANGES",
-            "MONITORED_PAIRS_CONFIG",
-            "ARBITRAGE_THRESHOLD",
-            "LOGGER",
-            "ArbEdgeKV",
-            "POSITIONS",
-          ].includes(key)
-      )
-    ),
-  };
-
-  // Initialize the mock execution context
-  mockExecutionContext = {
-    waitUntil: vi.fn(),
-    passThroughOnException: vi.fn(),
-    props: {},
-  } as unknown as ExecutionContext;
 
   // Reset OpportunityService mock
   (OpportunityService as unknown as Mock).mockImplementation((env, logger) => ({
@@ -705,15 +756,17 @@ describe("Worker Main Logic", () => {
         {
           id: "opp1",
           type: "spot",
-          pairSymbol: "BTC/USDT", // Changed from pair to pairSymbol
-          longExchange: "binance",
-          shortExchange: "kraken",
+          pair: "BTC/USDT",
+          longExchange: "binance" as ExchangeId,
+          shortExchange: "kraken" as ExchangeId,
           longRate: 0.01,
           shortRate: 0.02,
-          grossProfitMetric: 0.01, // Assuming rateDifference was meant to be grossProfitMetric
+          rateDifference: 0.01,
           timestamp: Date.now(),
-          potentialProfitValue: 100,
-          details: "Some details",
+          longExchangeTakerFeeRate: 0.001,
+          shortExchangeTakerFeeRate: 0.001,
+          totalEstimatedFees: 0.002,
+          netRateDifference: 0.008,
         },
       ];
 
@@ -743,25 +796,19 @@ describe("Worker Main Logic", () => {
     it("should return 404 for GET /find-opportunities with minimal router (OpportunityService branch)", async () => {
       const mockOpportunitiesData: ArbitrageOpportunity[] = [
         {
-          id: "opp-os-1", // Added id for consistency
+          id: "opp-os-1",
           type: "CEX-CEX",
-          pairSymbol: "BTC/USD", // Changed from pair to pairSymbol
-          longExchange: "binance",
-          shortExchange: "kraken",
-          buyPrice: 50000, // Added for consistency with ArbitrageOpportunity fields
-          sellPrice: 50500, // Added for consistency with ArbitrageOpportunity fields
-          grossProfitMetric: 500, // Assuming estimatedProfit from trade maps to grossProfitMetric
+          pair: "BTC/USD",
+          longExchange: "binance" as ExchangeId,
+          shortExchange: "kraken" as ExchangeId,
+          longRate: 50000,
+          shortRate: 50500,
+          rateDifference: 500,
           timestamp: Date.now(),
-          tradeExecutionDetails: {
-            // Moved nested trade object here
-            exchangeBuy: "binance",
-            exchangeSell: "kraken",
-            pair: "BTC/USD", // pair here is fine as it's specific to tradeExecutionDetails
-            buyPrice: 50000,
-            sellPrice: 50500,
-            amount: 1,
-            estimatedProfit: 500,
-          },
+          longExchangeTakerFeeRate: 0.001,
+          shortExchangeTakerFeeRate: 0.001,
+          totalEstimatedFees: 100,
+          netRateDifference: 400,
         },
       ];
       (OpportunityService as unknown as Mock).mockImplementationOnce(() => ({
@@ -780,9 +827,6 @@ describe("Worker Main Logic", () => {
     });
 
     it("should return 404 for GET /find-funding-rates with minimal router", async () => {
-      // const mockTelegramServiceInstance = { processFundingRateOpportunities: vi.fn().mockResolvedValue(undefined) };
-      // (TelegramService as unknown as Mock).mockImplementationOnce(() => mockTelegramServiceInstance);
-
       const request = mockRequest("GET", "http://localhost/find-funding-rates");
       const response = await httpWorker.fetch(
         request,
@@ -792,14 +836,10 @@ describe("Worker Main Logic", () => {
       expect(response.status).toBe(404);
       const responseText = await response.text();
       expect(responseText).toBe("ONLY ALL ROUTE ACTIVE");
-      // expect(mockTelegramServiceInstance.processFundingRateOpportunities).toHaveBeenCalled();
     });
 
     it("should return 404 for GET /find-funding-rates (error case) with minimal router", async () => {
       const errorMessage = "Service failure processing funding rates";
-      // const mockTelegramServiceInstance = { processFundingRateOpportunities: vi.fn().mockRejectedValue(new Error(errorMessage)) };
-      // (TelegramService as unknown as Mock).mockImplementationOnce(() => mockTelegramServiceInstance);
-
       const request = mockRequest("GET", "http://localhost/find-funding-rates");
       const response = await httpWorker.fetch(
         request,
@@ -809,8 +849,6 @@ describe("Worker Main Logic", () => {
       expect(response.status).toBe(404);
       const responseText = await response.text();
       expect(responseText).toBe("ONLY ALL ROUTE ACTIVE");
-      // expect(mockEnv.LOGGER.error).toHaveBeenCalledWith('Error in /find-funding-rates:', expect.any(Error));
-      // expect(mockTelegramServiceInstance.processFundingRateOpportunities).toHaveBeenCalled();
     });
 
     it("should return 404 for undefined routes", async () => {
@@ -844,14 +882,30 @@ describe("Worker Main Logic", () => {
 
 describe("Worker HTTP Endpoints - Minimal Ping Test", () => {
   beforeEach(() => {
-    vi.resetModules(); // Important for fresh worker instance per test
+    vi.resetModules();
     vi.clearAllMocks();
 
-    // Minimal mockEnv, add KV or DO stubs if absolutely required by the minimal worker
+    const {
+      LOGGER: _cfLogger,
+      ArbEdgeKV: _cfKV,
+      POSITIONS: _cfDO,
+      ...restOfCfTestEnv
+    } = cfTestEnv as Partial<ImportedEnv>;
+
+    // Fix for Line 893: Populate mockEnv for Minimal Ping Test to satisfy TestEnv requirements
     mockEnv = {
-      // LOG_LEVEL: 'debug', // Logger is removed from worker for now
-      // KV_NAMESPACE: createMockKvNamespace() as unknown as KVNamespace, // KV is not used by minimal ping
-      // POSITIONS_DO: createMockDoNamespace() as unknown as DurableObjectNamespace, // DO is not used by minimal ping
+      LOG_LEVEL: "debug",
+      TELEGRAM_BOT_TOKEN: "minimal_token",
+      TELEGRAM_CHAT_ID: "minimal_chat_id",
+      EXCHANGES: "mockex",
+      MONITORED_PAIRS_CONFIG: JSON.stringify([
+        { symbol: "BTC/USDT", base: "BTC", quote: "USDT", type: "swap" },
+      ]),
+      ARBITRAGE_THRESHOLD: "0.1",
+      LOGGER: createMockLogger(), // Use the mock logger, this is MockLogger
+      ArbEdgeKV: createSimpleMockKvNamespace(),
+      POSITIONS: createMockDurableObjectNamespace(),
+      ...restOfCfTestEnv, // Spread the rest of cfTestEnv
     };
   });
 
@@ -859,8 +913,12 @@ describe("Worker HTTP Endpoints - Minimal Ping Test", () => {
     const request = new Request("http://localhost/ping", { method: "GET" });
     const testCtx = cfCreateExecutionContext();
 
-    // Pass only the necessary parts of mockEnv that the simplified worker might expect (even if it's 'any')
-    const response = await httpWorker.fetch(request, mockEnv as Env, testCtx);
+    // Fix for Line 905: Change Env to ImportedEnv
+    const response = await httpWorker.fetch(
+      request,
+      mockEnv as ImportedEnv,
+      testCtx
+    );
     await cfWaitOnExecutionContext(testCtx);
 
     expect(response.status).toBe(200);
@@ -868,3 +926,36 @@ describe("Worker HTTP Endpoints - Minimal Ping Test", () => {
     expect(responseText).toBe("pong");
   });
 });
+
+// Mock data for ArbitrageOpportunity
+const mockOpportunity1: ArbitrageOpportunity = {
+  pair: "BTC/USDT",
+  longExchange: "binance" as ExchangeId,
+  shortExchange: "bybit" as ExchangeId,
+  longRate: 0.0001,
+  shortRate: 0.0002,
+  rateDifference: 0.0001, // Replaces grossProfitMetric if that was the intent
+  longExchangeTakerFeeRate: 0.0005,
+  shortExchangeTakerFeeRate: 0.0005,
+  totalEstimatedFees: 0.001,
+  netRateDifference: 0, // Example value
+  timestamp: Date.now(),
+  // id: "opp1", // Optional
+  // type: "CEX-CEX", // Optional
+};
+
+const mockOpportunity2: ArbitrageOpportunity = {
+  pair: "ETH/USDT",
+  longExchange: "kraken" as ExchangeId,
+  shortExchange: "okx" as ExchangeId,
+  longRate: 0.0003,
+  shortRate: 0.0005,
+  rateDifference: 0.0002, // Replaces grossProfitMetric
+  longExchangeTakerFeeRate: 0.0006,
+  shortExchangeTakerFeeRate: 0.0006,
+  totalEstimatedFees: 0.0012,
+  netRateDifference: 0.00008, // Example value
+  timestamp: Date.now() + 1000,
+  // id: "opp2", // Optional
+  // type: "CEX-CEX", // Optional
+};

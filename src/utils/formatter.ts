@@ -25,14 +25,14 @@ export function formatOpportunityMessage(
 ): string {
   // Destructure from TypedArbitrageOpportunity
   const {
-    pairSymbol,
+    pair,
     longExchange,
     shortExchange,
     longRate,
     shortRate,
-    grossProfitMetric, // This is the primary rateDifference for funding rates
-    netProfitMetric, // This would be the netRateDifference
-    potentialProfitValue, // For potential profit display
+    rateDifference,
+    netRateDifference,
+    potentialProfitValue,
     timestamp,
     type,
     details,
@@ -44,16 +44,16 @@ export function formatOpportunityMessage(
     typeof longRate === "number" ? (longRate * 100).toFixed(4) : "N/A";
   const shortRatePercent =
     typeof shortRate === "number" ? (shortRate * 100).toFixed(4) : "N/A";
-  const diffPercent = (grossProfitMetric * 100).toFixed(4);
+  const diffPercent = (rateDifference * 100).toFixed(4);
   const netDiffPercent =
-    typeof netProfitMetric === "number"
-      ? (netProfitMetric * 100).toFixed(4)
+    typeof netRateDifference === "number"
+      ? (netRateDifference * 100).toFixed(4)
       : undefined;
 
   const dateStr = new Date(timestamp).toLocaleString(); // Adjust locale/format as needed
 
   // Escape dynamic values
-  const pairEscaped = escapeMarkdownV2(pairSymbol);
+  const pairEscaped = escapeMarkdownV2(pair);
   const longExEscaped = escapeMarkdownV2(longExchange?.toUpperCase());
   const shortExEscaped = escapeMarkdownV2(shortExchange?.toUpperCase());
   const longRateEscaped = escapeMarkdownV2(longRatePercent);

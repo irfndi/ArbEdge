@@ -27,6 +27,8 @@ export interface LoggerInterface {
   warn(message: string, ...meta: unknown[]): void;
   error(message: string, ...meta: unknown[]): void;
   log(level: string, message: string, ...meta: unknown[]): void;
+  addError?(error: Error, ...meta: unknown[]): void;
+  addContext?(key: string, value: unknown): void;
   http?(message: string, ...meta: unknown[]): void;
   verbose?(message: string, ...meta: unknown[]): void;
   silly?(message: string, ...meta: unknown[]): void;

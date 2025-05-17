@@ -25,26 +25,31 @@ export type IExchangeFromCcxt = ccxt.Exchange; // Renamed to avoid conflict if I
 
 export interface IExchangeService {
   saveApiKey(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     apiKey: string,
     apiSecret: string
   ): Promise<void>;
   getApiKey(
-    exchangeId: string
+    exchangeId: ExchangeId
   ): Promise<{ apiKey: string; apiSecret: string } | null>;
-  deleteApiKey(exchangeId: string): Promise<void>;
+  deleteApiKey(exchangeId: ExchangeId): Promise<void>;
   loadMarketsForExchange(
-    exchangeId: string
+    exchangeId: ExchangeId
   ): Promise<Record<string, ccxt.Market> | null>;
-  getMarkets(exchangeId: string): Promise<Record<string, ccxt.Market> | null>;
-  getTicker(exchangeId: string, symbol: string): Promise<ccxt.Ticker | null>;
+  getMarkets(
+    exchangeId: ExchangeId
+  ): Promise<Record<string, ccxt.Market> | null>;
+  getTicker(
+    exchangeId: ExchangeId,
+    symbol: string
+  ): Promise<ccxt.Ticker | null>;
   getOrderBook(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string,
     limit?: number
   ): Promise<ccxt.OrderBook | null>;
   getFundingRate(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: TradingPairSymbol
   ): Promise<FundingRateInfo | null>;
   fetchFundingRates(
@@ -52,11 +57,11 @@ export interface IExchangeService {
     pairs: TradingPairSymbol[]
   ): Promise<FundingRateInfo[]>;
   getBalance(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     currencyCode?: string
   ): Promise<number | ccxt.Balances | null>;
   createOrder(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string,
     type: ccxt.OrderType,
     side: ccxt.OrderSide,
@@ -65,41 +70,45 @@ export interface IExchangeService {
     params?: Record<string, unknown>
   ): Promise<ccxt.Order | null>;
   cancelOrder(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     orderId: string,
     symbol?: string
   ): Promise<ccxt.Order | null>;
   getOpenOrders(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol?: string,
     since?: number,
     limit?: number
   ): Promise<ccxt.Order[] | null>;
   getOpenPositions(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol?: string
   ): Promise<ccxt.Position[] | null>;
   setLeverage(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string,
     leverage: number,
     params?: Record<string, unknown>
   ): Promise<unknown | null>;
   saveExchangeConfig(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     config: Record<string, unknown>
   ): Promise<void>;
   getExchangeConfig(
-    exchangeId: string
+    exchangeId: ExchangeId
   ): Promise<Record<string, unknown> | null>;
   getTradingFees(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string
   ): Promise<ccxt.TradingFeeInterface | null>;
   getTakerFeeRate(
     exchangeId: ExchangeId,
     symbol: TradingPairSymbol
   ): Promise<number | undefined>;
+  getAccountLeverage(
+    exchangeId: ExchangeId,
+    symbol: string
+  ): Promise<ccxt.Leverage | null>;
 }
 
 export type ExchangeCredentials = {
@@ -141,7 +150,7 @@ export class ExchangeService implements IExchangeService {
 
   // Method to get or create an exchange instance
   public async getExchangeInstance(
-    exchangeId: string
+    exchangeId: ExchangeId
   ): Promise<ccxt.Exchange | null> {
     if (this.exchangeInstances.has(exchangeId)) {
       const instance = this.exchangeInstances.get(exchangeId);
@@ -254,7 +263,7 @@ export class ExchangeService implements IExchangeService {
   }
 
   public async getTicker(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string
   ): Promise<ccxt.Ticker | null> {
     try {
@@ -262,8 +271,10 @@ export class ExchangeService implements IExchangeService {
       if (!instance) return null;
 
       // Check if the exchange supports fetching tickers
-      if (!instance.has.fetchTicker) {
-        this.logger.warn(`${exchangeId} does not support fetchTicker.`);
+      if (!instance.has?.fetchTicker) {
+        this.logger.warn(
+          `getTicker: Exchange ${exchangeId} does not support fetchTicker for ${symbol}`
+        );
         return null;
       }
       return await instance.fetchTicker(symbol);
@@ -290,7 +301,7 @@ export class ExchangeService implements IExchangeService {
   }
 
   public async getOrderBook(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string,
     limit?: number
   ): Promise<ccxt.OrderBook | null> {
@@ -298,7 +309,7 @@ export class ExchangeService implements IExchangeService {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.fetchOrderBook) {
+      if (!instance.has?.fetchOrderBook) {
         this.logger.warn(`${exchangeId} does not support fetchOrderBook.`);
         return null;
       }
@@ -313,14 +324,14 @@ export class ExchangeService implements IExchangeService {
   }
 
   public async getFundingRate(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: TradingPairSymbol
   ): Promise<FundingRateInfo | null> {
     try {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.fetchFundingRate) {
+      if (!instance.has?.fetchFundingRate) {
         this.logger.warn(`${exchangeId} does not support fetchFundingRate.`);
         return null;
       }
@@ -414,14 +425,14 @@ export class ExchangeService implements IExchangeService {
 
   // --- Account --- //
   public async getBalance(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     currencyCode?: string
   ): Promise<number | ccxt.Balances | null> {
     try {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.fetchBalance) {
+      if (!instance.has?.fetchBalance) {
         this.logger.warn(`${exchangeId} does not support fetchBalance.`);
         return null;
       }
@@ -438,7 +449,7 @@ export class ExchangeService implements IExchangeService {
 
   // --- Trading --- //
   public async createOrder(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string,
     type: ccxt.OrderType,
     side: ccxt.OrderSide,
@@ -450,7 +461,7 @@ export class ExchangeService implements IExchangeService {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.createOrder) {
+      if (!instance.has?.createOrder) {
         this.logger.warn(`${exchangeId} does not support createOrder.`);
         return null;
       }
@@ -488,7 +499,7 @@ export class ExchangeService implements IExchangeService {
   }
 
   public async cancelOrder(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     orderId: string,
     symbol?: string
   ): Promise<ccxt.Order | null> {
@@ -496,7 +507,7 @@ export class ExchangeService implements IExchangeService {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.cancelOrder) {
+      if (!instance.has?.cancelOrder) {
         this.logger.warn(`${exchangeId} does not support cancelOrder.`);
         return null;
       }
@@ -526,7 +537,7 @@ export class ExchangeService implements IExchangeService {
   }
 
   public async getOpenOrders(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol?: string,
     since?: number,
     limit?: number
@@ -535,7 +546,7 @@ export class ExchangeService implements IExchangeService {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.fetchOpenOrders) {
+      if (!instance.has?.fetchOpenOrders) {
         this.logger.warn(`${exchangeId} does not support fetchOpenOrders.`);
         return null;
       }
@@ -550,14 +561,14 @@ export class ExchangeService implements IExchangeService {
   }
 
   public async getOpenPositions(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol?: string
   ): Promise<ccxt.Position[] | null> {
     try {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.fetchPositions) {
+      if (!instance.has?.fetchPositions) {
         this.logger.warn(`${exchangeId} does not support fetchPositions.`);
         return []; // Return empty array or null based on desired contract
       }
@@ -590,7 +601,7 @@ export class ExchangeService implements IExchangeService {
   }
 
   public async setLeverage(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string,
     leverage: number,
     params?: Record<string, unknown>
@@ -600,7 +611,7 @@ export class ExchangeService implements IExchangeService {
       const instance = await this.getExchangeInstance(exchangeId);
       if (!instance) return null;
 
-      if (!instance.has.setLeverage) {
+      if (!instance.has?.setLeverage) {
         this.logger.warn(`${exchangeId} does not support setLeverage.`);
         return null;
       }
@@ -645,7 +656,7 @@ export class ExchangeService implements IExchangeService {
    * @returns A promise that resolves to the fee structure or null if an error occurs.
    */
   public async getTradingFees(
-    exchangeId: string,
+    exchangeId: ExchangeId,
     symbol: string
   ): Promise<ccxt.TradingFeeInterface | null> {
     try {
@@ -655,8 +666,10 @@ export class ExchangeService implements IExchangeService {
         return null;
       }
 
-      if (!instance.has.fetchTradingFees) {
-        this.logger.warn(`${exchangeId} does not support fetchTradingFees.`);
+      if (!instance.has?.fetchTradingFees) {
+        this.logger.warn(
+          `getTradingFees: Exchange ${exchangeId} does not support fetchTradingFees for symbol ${symbol}.`
+        );
         return null;
       }
 
@@ -711,7 +724,8 @@ export class ExchangeService implements IExchangeService {
         );
       } else {
         this.logger.error(
-          `Unknown error for ${exchangeId} while fetching trading fees for ${symbol}: ${error instanceof Error ? error.message : String(error)}`
+          `Error fetching trading fees for ${exchangeId} and symbol ${symbol}:`,
+          error instanceof Error ? error : new Error(String(error))
         );
       }
       return null;
@@ -743,6 +757,60 @@ export class ExchangeService implements IExchangeService {
         { error }
       );
       return undefined;
+    }
+  }
+
+  public async getAccountLeverage(
+    exchangeId: ExchangeId,
+    symbol: string
+  ): Promise<ccxt.Leverage | null> {
+    try {
+      const instance = await this.getExchangeInstance(exchangeId);
+      if (!instance) {
+        this.logger.error(
+          `getAccountLeverage: Failed to get instance for ${exchangeId}`
+        );
+        return null;
+      }
+
+      if (!instance.has?.fetchLeverage) {
+        this.logger.warn(
+          `getAccountLeverage: Exchange ${exchangeId} does not support fetchLeverage for symbol ${symbol}.`
+        );
+        return null;
+      }
+
+      const leverage = await instance.fetchLeverage(symbol);
+
+      // Ensure the returned leverage object is valid.
+      // Check based on the test's Leverage interface structure, compatible with ccxt.Leverage.
+      if (leverage && typeof leverage.longLeverage === "number") {
+        return leverage as ccxt.Leverage;
+      }
+      this.logger.warn(
+        `getAccountLeverage: Invalid or incomplete leverage data returned for ${symbol} on ${exchangeId}. Data: ${JSON.stringify(leverage)}`
+      );
+      return null;
+    } catch (error) {
+      // Standard error logging for different ccxt error types
+      if (error instanceof ccxt.RateLimitExceeded) {
+        this.logger.warn(
+          `Rate limit exceeded for ${exchangeId} while fetching leverage for ${symbol}: ${error.message}`
+        );
+      } else if (error instanceof ccxt.NetworkError) {
+        this.logger.error(
+          `Network error for ${exchangeId} while fetching leverage for ${symbol}: ${error.message}`
+        );
+      } else if (error instanceof ccxt.ExchangeError) {
+        this.logger.error(
+          `Exchange error for ${exchangeId} while fetching leverage for ${symbol}: ${error.message}`
+        );
+      } else {
+        this.logger.error(
+          `Unknown error for ${exchangeId} while fetching leverage for ${symbol}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      return null;
     }
   }
 }

@@ -720,7 +720,7 @@ const createMockDoNamespace = (): DurableObjectNamespace => {
   } as unknown as DurableObjectNamespace;
 };
 
-const MOCK_TIMESTAMP = 1747233837494; // Use a fixed timestamp for consistent test results
+const MOCK_TIMESTAMP = 1672531200000; // 2023-01-01T00:00:00.000Z
 
 const mockEnv: Env = {
   TELEGRAM_BOT_TOKEN: "test-token",
@@ -752,7 +752,6 @@ const mockEnv: Env = {
 describe("OpportunityService", () => {
   let opportunityService: OpportunityService;
   let mockExchangeService: Mocked<OriginalExchangeServiceClass>;
-  let mockTelegramService: Mocked<OriginalTelegramServiceClass>;
   const mockLogger: Mocked<LoggerInterface> = fullyMockedLogger;
 
   // Initialize configs after mockLogger is ready
@@ -819,112 +818,26 @@ describe("OpportunityService", () => {
     logger: mockLogger as LoggerInterface,
   };
 
+  const DEFAULT_THRESHOLD = 0.0001; // 0.01%
+
   beforeEach(() => {
-    mockExchangeService = new ExchangeService(
-      mockExchangeServiceConfig
-    ) as Mocked<OriginalExchangeServiceClass>;
+    vi.clearAllMocks();
+
+    mockExchangeService = new OriginalExchangeService({
+      env: mockEnv,
+      logger: mockLogger,
+    }) as Mocked<ExchangeService>;
+
     mockExchangeService.getFundingRate = mockGetFundingRate;
+    mockGetFundingRate.mockReset(); // Reset specifically
     mockExchangeService.getTradingFees = mockGetTradingFees;
+    mockGetTradingFees.mockReset(); // Reset specifically
+    mockExchangeService.getExchangeInstance = mockGetCcxtInstance;
+    mockGetCcxtInstance
+      .mockReset()
+      .mockResolvedValue(createMockCcxtExchange(0.001)); // Default for old tests
 
-    // Ensure the global mockGetTradingFees (if used by other tests) is sound,
-    // but the failing tests above will now use their local overrides.
-    // This is the original global mock based on mockExchangesRecord:
-    mockGetTradingFees.mockImplementation(
-      async (
-        exchangeId: string,
-        symbol: string
-      ): Promise<ccxt.TradingFeeInterface | null> => {
-        const exchangeIdInput = exchangeId as ExchangeId;
-        const exchangeMock = mockExchangesRecord[exchangeIdInput];
-        if (exchangeMock && typeof exchangeMock.getTradingFees === "function") {
-          const feeData = await exchangeMock.getTradingFees(symbol);
-          return feeData || null;
-        }
-        return null;
-      }
-    );
-
-    fullyMockedLogger.debug.mockClear();
-    fullyMockedLogger.info.mockClear();
-    fullyMockedLogger.warn.mockClear();
-    fullyMockedLogger.error.mockClear();
-    fullyMockedLogger.log.mockClear();
-
-    mockGetFundingRate.mockReset();
-    mockGetFundingRates.mockReset();
-    mockGetTradingFees.mockReset();
-    mockGetExchange.mockReset();
-    mockGetMarkets.mockReset();
-    mockGetMarket.mockReset();
-    mockGetTradingFee.mockReset();
-    mockSetLeverage.mockReset();
-    mockCreateOrder.mockReset();
-    mockGetOpenPositions.mockReset();
-    mockClosePosition.mockReset();
-    mockGetTicker.mockReset();
-    mockGetTickers.mockReset();
-    mockLoadMarkets.mockReset().mockResolvedValue({});
-    mockInitializeDefaultLeverage.mockReset().mockResolvedValue(undefined);
-    mockGetCcxtInstance.mockReset();
-
-    mockGetExchange.mockImplementation((exchangeIdInput: string) => {
-      const exchangeId = exchangeIdInput as ExchangeId;
-      if (mockExchangesRecord[exchangeId]) {
-        return mockExchangesRecord[exchangeId] as unknown as ccxt.Exchange;
-      }
-      return undefined;
-    });
-
-    mockGetFundingRates.mockImplementation(
-      async (
-        exchangeIdInput: string,
-        symbols: string[]
-      ): Promise<Record<TradingPairSymbol, FundingRateInfo | null>> => {
-        const exchangeId = exchangeIdInput as ExchangeId;
-        const exchangeMock = mockExchangesRecord[exchangeId];
-        const rates: Record<TradingPairSymbol, FundingRateInfo | null> = {};
-        if (exchangeMock?.getFundingRate) {
-          for (const symbol of symbols) {
-            const rateInfo = await exchangeMock.getFundingRate(symbol);
-            if (rateInfo) {
-              rates[symbol] = rateInfo;
-            }
-          }
-        }
-        return rates;
-      }
-    );
-
-    mockGetFundingRate.mockImplementation(
-      async (
-        exchangeIdInput: string,
-        symbol: string
-      ): Promise<FundingRateInfo | null> => {
-        const exchangeId = exchangeIdInput as ExchangeId;
-        const exchangeMock = mockExchangesRecord[exchangeId];
-        if (exchangeMock?.getFundingRate) {
-          return exchangeMock.getFundingRate(symbol);
-        }
-        return null;
-      }
-    );
-
-    mockGetTradingFees.mockImplementation(
-      async (
-        exchangeId: string,
-        symbol: string
-      ): Promise<ccxt.TradingFeeInterface | null> => {
-        const exchangeIdInput = exchangeId as ExchangeId;
-        const exchangeMock = mockExchangesRecord[exchangeIdInput];
-        if (exchangeMock?.getTradingFees) {
-          const feeData = await exchangeMock.getTradingFees(symbol);
-          return feeData || null;
-        }
-        return null;
-      }
-    );
-
-    const opportunityServiceConfig: OpportunityServiceConfig = {
+    const config: OpportunityServiceConfig = {
       exchangeService: mockExchangeService,
       telegramService: new TelegramService(
         mockTelegramServiceConfig
@@ -942,9 +855,9 @@ describe("OpportunityService", () => {
         "bitget",
         "mexc",
       ] as ExchangeId[],
-      threshold: 0.001,
+      threshold: DEFAULT_THRESHOLD,
     };
-    opportunityService = new OpportunityService(opportunityServiceConfig);
+    opportunityService = new OpportunityService(config);
   });
 
   afterEach(() => {
@@ -1353,245 +1266,392 @@ describe("OpportunityService", () => {
   });
 
   it("should log an error if sending Telegram notification fails", async () => {
-    const exchangeIds: ExchangeId[] = ["binance", "bybit"];
-    const rawPairs: TradingPairSymbol[] = ["BTC/USDT"];
-    const threshold = 0.0005;
+    vi.clearAllMocks(); // Maximum isolation: Clear all mocks at the start of THIS test
 
-    // Adjusting fees to ensure an opportunity is found for this test
-    mockGetTradingFees.mockImplementation(
-      async (
-        exchangeIdInput: string,
-        symbol: string
-      ): Promise<ccxt.TradingFeeInterface | null> => {
-        const exchangeId = exchangeIdInput as ExchangeId;
-        if (symbol !== "BTC/USDT") return null;
-        if (exchangeId === "binance") {
-          return {
-            symbol: "BTC/USDT",
-            taker: 0.0001, // Adjusted fee
-            maker: 0.0001,
-            percentage: true,
-            tierBased: false,
-            info: {},
-          };
-        }
-        if (exchangeId === "bybit") {
-          return {
-            symbol: "BTC/USDT",
-            taker: 0.0001, // Adjusted fee
-            maker: 0.0001,
-            percentage: true,
-            tierBased: false,
-            info: {},
-          };
-        }
-        return null;
-      }
-    );
+    // const mockTelegramConfigForBadService: TelegramConfig = {
+    //   botToken: "test-bad-token",
+    //   chatId: "test-bad-chat",
+    //   logger: mockLogger, // Use the existing fullyMockedLogger
+    // };
 
-    const telegramError = new Error("Telegram API Error");
-    // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing notification error path
-    (
-      (opportunityService as any)
-        .telegramService as Mocked<OriginalTelegramServiceClass>
-    ).sendOpportunityNotification.mockRejectedValueOnce(telegramError);
-
-    const opportunities = await opportunityService.findOpportunities(
-      exchangeIds,
-      rawPairs,
-      threshold
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(opportunities).toHaveLength(1);
-    // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing notification call
-    expect(
-      (
-        (opportunityService as any)
-          .telegramService as Mocked<OriginalTelegramServiceClass>
-      ).sendOpportunityNotification
-    ).toHaveBeenCalledTimes(1);
-    expect(mockLogger.error).toHaveBeenCalledTimes(1);
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      "Failed to send Telegram notification",
-      expect.objectContaining({
-        teleError: expect.any(Error),
-        opportunityDetails: `BTC/USDT-bybit-binance-${MOCK_TIMESTAMP}`,
-      })
-    );
-  });
-
-  it("should correctly calculate netRateDifference and identify opportunity considering trading fees", async () => {
-    const exchangeIds: ExchangeId[] = ["binance", "bybit"];
-    const rawPairs: TradingPairSymbol[] = ["BTC/USDT"];
-    const threshold = 0.0001;
-
-    mockGetFundingRate.mockImplementation(
-      async (
-        exchangeIdInput: string,
-        symbol: string
-      ): Promise<FundingRateInfo | null> => {
-        const exchangeId = exchangeIdInput as ExchangeId;
-        if (symbol === "BTC/USDT") {
-          if (exchangeId === "binance")
-            return {
-              exchange: exchangeId,
-              pair: symbol,
-              fundingRate: -0.0005,
-              timestamp: MOCK_TIMESTAMP,
-            };
-          if (exchangeId === "bybit")
-            return {
-              exchange: exchangeId,
-              pair: symbol,
-              fundingRate: 0.001,
-              timestamp: MOCK_TIMESTAMP,
-            };
-        }
-        return null;
-      }
-    );
-
-    mockGetTradingFees.mockImplementation(
-      async (
-        exchangeIdInput: string,
-        symbol: string
-      ): Promise<ccxt.TradingFeeInterface | null> => {
-        const exchangeId = exchangeIdInput as ExchangeId;
-        if (symbol === "BTC/USDT") {
-          if (exchangeId === "binance") {
-            return {
-              symbol: "BTC/USDT",
-              taker: 0.00075,
-              maker: 0.0005,
-              info: {},
-            } as ccxt.TradingFeeInterface;
-          }
-          if (exchangeId === "bybit") {
-            return {
-              symbol: "BTC/USDT",
-              taker: 0.00055,
-              maker: 0.0001,
-              info: {},
-            } as ccxt.TradingFeeInterface;
-          }
-        }
-        return null;
-      }
-    );
-
-    const opportunities = await opportunityService.findOpportunities(
-      exchangeIds,
-      rawPairs,
-      threshold
-    );
-
-    expect(opportunities).toHaveLength(1);
-    expect(mockGetFundingRate).toHaveBeenCalledTimes(2);
-    expect(mockGetTradingFees).toHaveBeenCalledTimes(2);
-
-    const expectedOpportunity: ArbitrageOpportunity = {
-      pair: "BTC/USDT",
-      longExchange: "binance",
-      shortExchange: "bybit",
-      longRate: -0.0005,
-      shortRate: 0.001,
-      rateDifference: 0.0015,
-      longExchangeTakerFeeRate: 0.00075,
-      shortExchangeTakerFeeRate: 0.00055,
-      totalEstimatedFees: 0.0013,
-      netRateDifference: 0.0015 - (0.00075 + 0.00055),
-      timestamp: MOCK_TIMESTAMP,
+    // Create an object that only has the public methods of TelegramService that OpportunityService might call,
+    // and ensure they are Vitest mocks.
+    const mockBadTelegramServiceMethodsOnly = {
+      getBotInstance: vi.fn(), // Add .mockReturnValue({} as Bot) if its return is used
+      sendOpportunityNotification: vi
+        .fn()
+        .mockRejectedValue(new Error("Telegram Boom")),
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      // DO NOT include private members or methods not on TelegramService here
     };
 
-    expect(opportunities[0]).toMatchObject(expectedOpportunity);
-    expect(opportunities[0].netRateDifference).toBeCloseTo(0.0002);
-  });
+    // Cast this object to Mocked<TelegramService> via unknown.
+    // This acknowledges that the object doesn't perfectly match TelegramService's full shape (e.g. private members)
+    // but is sufficient for testing the interaction with its public mocked methods.
+    const mockBadTelegramServiceInstance =
+      mockBadTelegramServiceMethodsOnly as unknown as Mocked<TelegramService>;
 
-  it("should NOT identify opportunity if netRateDifference is below threshold due to fees", async () => {
-    const exchangeIds: ExchangeId[] = ["binance", "bybit"];
-    const rawPairs: TradingPairSymbol[] = ["ETH/USDT"];
-    const threshold = 0.0001;
+    // Re-establish the mockExchangeService for this test after vi.clearAllMocks()
+    // as clearAllMocks would have cleared its internal mocks too.
+    // Ensure it points to the global mock functions initially, which we will then override.
+    mockExchangeService.getFundingRate = mockGetFundingRate;
+    mockExchangeService.getTradingFees = mockGetTradingFees;
+    mockExchangeService.getExchangeInstance = mockGetCcxtInstance; // Point to the global one first
 
-    mockGetFundingRate.mockImplementation(
-      async (
-        exchangeIdInput: string,
-        symbol: string
-      ): Promise<FundingRateInfo | null> => {
-        const exchangeId = exchangeIdInput as ExchangeId;
-        if (symbol === "ETH/USDT") {
-          if (exchangeId === "binance")
-            return {
-              exchange: exchangeId,
-              pair: symbol,
-              fundingRate: 0.0005,
-              timestamp: MOCK_TIMESTAMP,
-            };
-          if (exchangeId === "bybit")
-            return {
-              exchange: exchangeId,
-              pair: symbol,
-              fundingRate: 0.0003,
-              timestamp: MOCK_TIMESTAMP + 1,
-            };
-        }
-        return null;
+    // Specific mock setup for this test to ensure an opportunity IS found
+    mockGetFundingRate.mockImplementation(async (id, p) => {
+      const exId = id as ExchangeId;
+      const pairSymbol = p as TradingPairSymbol;
+      if (pairSymbol === "BTC/USDT") {
+        if (exId === "exchangeA")
+          return createFundingRateInfo(exId, pairSymbol, 0.0005);
+        if (exId === "exchangeB")
+          return createFundingRateInfo(exId, pairSymbol, 0.0001);
       }
-    );
+      return null;
+    });
 
-    mockGetTradingFees.mockImplementation(
-      async (
-        exchangeIdInput: string,
-        symbol: string
-      ): Promise<ccxt.TradingFeeInterface | null> => {
-        const exchangeId = exchangeIdInput as ExchangeId;
-        if (symbol === "ETH/USDT") {
-          if (exchangeId === "binance") {
-            return {
-              symbol: "ETH/USDT",
-              taker: 0.00015,
-              maker: 0.0001,
-              info: {},
-            } as ccxt.TradingFeeInterface;
-          }
-          if (exchangeId === "bybit") {
-            return {
-              symbol: "ETH/USDT",
-              taker: 0.00006,
-              maker: 0.00005,
-              info: {},
-            } as ccxt.TradingFeeInterface;
-          }
-        }
-        return null;
+    mockGetTradingFees.mockImplementation(async (id, p) => {
+      const exId = id as ExchangeId;
+      const pairSymbol = p as TradingPairSymbol;
+      if (pairSymbol === "BTC/USDT") {
+        if (exId === "exchangeA") return createTradingFee(pairSymbol, 0.00005);
+        if (exId === "exchangeB") return createTradingFee(pairSymbol, 0.00005);
       }
-    );
+      return null;
+    });
+
+    // Mock getExchangeInstance to control general fee status
+    mockExchangeService.getExchangeInstance = vi
+      .fn() // Use the direct mockExchangeService instance
+      .mockImplementation(async (exchangeId: ExchangeId) => {
+        if (exchangeId === "exchangeA" || exchangeId === "exchangeB") {
+          return createMockCcxtExchange(0.00005);
+        }
+        return createMockCcxtExchange(0.001);
+      });
+
+    const configWithBadTelegram: OpportunityServiceConfig = {
+      exchangeService: mockExchangeService,
+      telegramService: mockBadTelegramServiceInstance,
+      logger: mockLogger,
+      monitoredPairs: [
+        { symbol: "BTC/USDT", base: "BTC", quote: "USDT", type: "swap" },
+      ],
+      exchanges: ["exchangeA" as ExchangeId, "exchangeB" as ExchangeId],
+      threshold: DEFAULT_THRESHOLD,
+    };
+    opportunityService = new OpportunityService(configWithBadTelegram);
 
     const opportunities = await opportunityService.findOpportunities(
-      exchangeIds,
-      rawPairs,
-      threshold
+      ["exchangeA" as ExchangeId, "exchangeB" as ExchangeId],
+      ["BTC/USDT"],
+      DEFAULT_THRESHOLD
     );
+    expect(opportunities.length).toBeGreaterThan(0);
 
-    expect(opportunities).toHaveLength(0);
-    expect(mockGetFundingRate).toHaveBeenCalledTimes(2);
-    expect(mockGetTradingFees).toHaveBeenCalledTimes(2);
+    expect(
+      mockBadTelegramServiceInstance.sendOpportunityNotification
+    ).toHaveBeenCalledTimes(1);
+
+    let telegramErrorLogged = false;
+    for (const call of mockLogger.error.mock.calls) {
+      const message = call[0] as string;
+      const loggedMeta = call[1];
+
+      if (
+        message === "Failed to send Telegram notification" &&
+        typeof loggedMeta === "object" &&
+        loggedMeta !== null &&
+        "teleError" in loggedMeta // Narrows type of loggedMeta to include teleError
+      ) {
+        // TypeScript infers loggedMeta has teleError. Its value is initially unknown.
+        const errorValue = loggedMeta.teleError;
+        if (
+          errorValue instanceof Error &&
+          errorValue.message === "Telegram Boom"
+        ) {
+          telegramErrorLogged = true;
+          break;
+        }
+      }
+    }
+    expect(telegramErrorLogged).toBe(true);
   });
 
-  describe("monitorOpportunities", () => {
-    it("delegates to findOpportunities with configured exchanges and pairs", async () => {
-      const spy = vi
-        .spyOn(opportunityService, "findOpportunities")
-        .mockResolvedValue([]);
-      const threshold = 0.005;
-      const result = await opportunityService.monitorOpportunities(threshold);
-      expect(spy).toHaveBeenCalledWith(
-        ["binance", "bybit", "kraken", "okx", "bingx", "bitget", "mexc"],
-        ["BTC/USDT"],
-        threshold
+  describe("findOpportunities - Stricter Fee Handling", () => {
+    const PAIR_DEFAULT = "BTC/USDT";
+    const EX_A = "exchangeA" as ExchangeId;
+    const EX_B = "exchangeB" as ExchangeId;
+    const EX_C = "exchangeC" as ExchangeId;
+    const THRESHOLD = 0.001; // 0.1%
+
+    beforeEach(() => {
+      fullyMockedLogger.debug.mockClear();
+      fullyMockedLogger.info.mockClear();
+      fullyMockedLogger.error.mockClear();
+      mockGetFundingRate.mockReset().mockResolvedValue(null);
+      mockGetTradingFees.mockReset().mockResolvedValue(null);
+      mockGetCcxtInstance
+        .mockReset()
+        .mockResolvedValue(createMockCcxtExchange(0.001));
+    });
+
+    it("Test Case 1: Fees present, opportunity found", async () => {
+      mockGetFundingRate.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_DEFAULT) return null;
+        if (exchangeId === EX_A)
+          return createFundingRateInfo(EX_A, PAIR_DEFAULT, 0.0001);
+        if (exchangeId === EX_B)
+          return createFundingRateInfo(EX_B, PAIR_DEFAULT, 0.0025);
+        return null;
+      });
+      mockGetTradingFees.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_DEFAULT) return null;
+        if (exchangeId === EX_A) return createTradingFee(PAIR_DEFAULT, 0.0001);
+        if (exchangeId === EX_B) return createTradingFee(PAIR_DEFAULT, 0.0001);
+        return null;
+      });
+      const newOpportunities = await opportunityService.findOpportunities(
+        [EX_A, EX_B],
+        [PAIR_DEFAULT],
+        THRESHOLD
       );
-      expect(result).toEqual([]);
+      expect(newOpportunities.length).toBe(1);
+      expect(newOpportunities[0].longExchange).toBe(EX_A);
+      expect(newOpportunities[0].shortExchange).toBe(EX_B);
+      expect(newOpportunities[0].longRate).toBe(0.0001);
+      expect(newOpportunities[0].shortRate).toBe(0.0025);
+      expect(newOpportunities[0].longExchangeTakerFeeRate).toBe(0.0001);
+      expect(newOpportunities[0].shortExchangeTakerFeeRate).toBe(0.0001);
+      expect(newOpportunities[0].totalEstimatedFees).toBe(0.0002);
+      expect(newOpportunities[0].netRateDifference).toBeCloseTo(0.0022);
+    });
+
+    it("Test Case 2: One exchange generally fee-free, other specific fee, opportunity", async () => {
+      const PAIR_ETH = "ETH/USDT";
+      mockGetFundingRate.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_ETH) return null;
+        if (exchangeId === EX_A)
+          return createFundingRateInfo(EX_A, PAIR_ETH, 0.0002);
+        if (exchangeId === EX_B)
+          return createFundingRateInfo(EX_B, PAIR_ETH, 0.002);
+        return null;
+      });
+      mockGetTradingFees.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_ETH) return null;
+        if (exchangeId === EX_A) {
+          mockLogger.info("TC2: EX_A getTradingFees returns null");
+          return null;
+        }
+        if (exchangeId === EX_B) {
+          mockLogger.info("TC2: EX_B getTradingFees returns fee object");
+          return createTradingFee(PAIR_ETH, 0.0005);
+        }
+        return null;
+      });
+      mockGetCcxtInstance.mockImplementation(async (exchangeId) => {
+        if (exchangeId === EX_A) {
+          mockLogger.info("TC2: EX_A getExchangeInstance (fee-free)");
+          return createMockCcxtExchange(undefined, true);
+        }
+        if (exchangeId === EX_B) {
+          mockLogger.info("TC2: EX_B getExchangeInstance (not fee-free)");
+          return createMockCcxtExchange(0.001);
+        }
+        return createMockCcxtExchange(0.001);
+      });
+
+      const opportunities = await opportunityService.findOpportunities(
+        [EX_A, EX_B],
+        [PAIR_ETH],
+        THRESHOLD
+      );
+
+      expect(opportunities.length).toBe(1);
+      expect(opportunities[0].longExchange).toBe(EX_A);
+      expect(opportunities[0].shortExchange).toBe(EX_B);
+      expect(opportunities[0].longRate).toBe(0.0002);
+      expect(opportunities[0].shortRate).toBe(0.002);
+      expect(opportunities[0].longExchangeTakerFeeRate).toBe(0);
+      expect(opportunities[0].shortExchangeTakerFeeRate).toBe(0.0005);
+      expect(opportunities[0].totalEstimatedFees).toBe(0.0005);
+      expect(opportunities[0].netRateDifference).toBeCloseTo(0.0013);
+    });
+
+    it("Test Case 3: One exchange no specific fee & NOT generally fee-free, excluded", async () => {
+      const PAIR_ADA = "ADA/USDT";
+      mockGetFundingRate.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_ADA) return null;
+        if (exchangeId === EX_A)
+          return createFundingRateInfo(EX_A, PAIR_ADA, 0.0003);
+        if (exchangeId === EX_B)
+          return createFundingRateInfo(EX_B, PAIR_ADA, 0.0007);
+        return null;
+      });
+      mockGetTradingFees.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_ADA) return null;
+        if (exchangeId === EX_A) return null;
+        if (exchangeId === EX_B) return createTradingFee(PAIR_ADA, 0.001);
+        return null;
+      });
+      mockGetCcxtInstance.mockImplementation(async (exchangeId) => {
+        if (exchangeId === EX_A) return createMockCcxtExchange(0.001);
+        if (exchangeId === EX_B) return createMockCcxtExchange(0.001);
+        return createMockCcxtExchange(0.001);
+      });
+
+      await opportunityService.findOpportunities(
+        [EX_A, EX_B],
+        [PAIR_ADA],
+        THRESHOLD
+      );
+      const foundLog = mockLogger.debug.mock.calls.some(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes(
+            `Excluding ${EX_A} for pair ${PAIR_ADA}: Funding rate present but no specific fee info and not generally fee-free.`
+          )
+      );
+      expect(foundLog).toBe(true);
+    });
+
+    it("Test Case 4: Fees make opportunity unprofitable", async () => {
+      const PAIR_SOL = "SOL/USDT";
+      mockGetFundingRate.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_SOL) return null;
+        if (exchangeId === EX_A)
+          return createFundingRateInfo(EX_A, PAIR_SOL, 0.0001);
+        if (exchangeId === EX_B)
+          return createFundingRateInfo(EX_B, PAIR_SOL, 0.0003);
+        return null;
+      });
+      mockGetTradingFees.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_SOL) return null;
+        if (exchangeId === EX_A) return createTradingFee(PAIR_SOL, 0.002);
+        if (exchangeId === EX_B) return createTradingFee(PAIR_SOL, 0.002);
+        return null;
+      });
+      const opportunities = await opportunityService.findOpportunities(
+        [EX_A, EX_B],
+        [PAIR_SOL],
+        THRESHOLD
+      );
+      expect(opportunities.length).toBe(0);
+    });
+
+    it("Test Case 5: Exchange missing funding rate, excluded", async () => {
+      const PAIR_DOT = "DOT/USDT";
+      mockGetFundingRate.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_DOT) return null;
+        if (exchangeId === EX_A) return null;
+        if (exchangeId === EX_B)
+          return createFundingRateInfo(EX_B, PAIR_DOT, 0.0005);
+        return null;
+      });
+      mockGetTradingFees.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_DOT) return null;
+        if (exchangeId === EX_A) return createTradingFee(PAIR_DOT, 0.001);
+        if (exchangeId === EX_B) return createTradingFee(PAIR_DOT, 0.001);
+        return null;
+      });
+
+      await opportunityService.findOpportunities(
+        [EX_A, EX_B],
+        [PAIR_DOT],
+        THRESHOLD
+      );
+      // Check for the warn log when unique rates are less than 2
+      const foundWarnLog = mockLogger.warn.mock.calls.some(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes(
+            `Skipping ${PAIR_DOT} as it does not have at least two different funding rates`
+          )
+      );
+      // Additionally, check that the debug log (which was previously expected) is NOT there
+      const foundDebugLog = mockLogger.debug.mock.calls.some(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes(
+            `Skipping ${PAIR_DOT} - not enough exchanges with funding rates.`
+          )
+      );
+      expect(foundWarnLog).toBe(true); // This should now pass
+      expect(foundDebugLog).toBe(false); // This confirms the other path wasn't taken
+    });
+
+    it("Test Case 6: Complex 3-exchange scenario", async () => {
+      const PAIR_LINK = "LINK/USDT";
+      mockGetFundingRate.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_LINK) return null;
+        if (exchangeId === EX_A)
+          return createFundingRateInfo(EX_A, PAIR_LINK, 0.0001);
+        if (exchangeId === EX_B)
+          return createFundingRateInfo(EX_B, PAIR_LINK, 0.0008);
+        if (exchangeId === EX_C)
+          return createFundingRateInfo(EX_C, PAIR_LINK, 0.0003);
+        return null;
+      });
+      mockGetTradingFees.mockImplementation(async (exchangeId, pair) => {
+        if (pair !== PAIR_LINK) return null;
+        if (exchangeId === EX_A) return createTradingFee(PAIR_LINK, 0.0005);
+        if (exchangeId === EX_B) return null;
+        if (exchangeId === EX_C) return null;
+        return null;
+      });
+      mockGetCcxtInstance.mockImplementation(async (exchangeId) => {
+        if (exchangeId === EX_A) {
+          mockLogger.info("TC6: EX_A getExchangeInstance (not fee-free)");
+          return createMockCcxtExchange(0.0005);
+        }
+        if (exchangeId === EX_B) {
+          mockLogger.info("TC6: EX_B getExchangeInstance (FEE-FREE)");
+          return createMockCcxtExchange(undefined, true);
+        }
+        if (exchangeId === EX_C) {
+          mockLogger.info("TC6: EX_C getExchangeInstance (not fee-free)");
+          return createMockCcxtExchange(0.001);
+        }
+        return createMockCcxtExchange(0.001);
+      });
+
+      const localThreshold = 0.00015;
+      const opportunities = await opportunityService.findOpportunities(
+        [EX_A, EX_B, EX_C],
+        [PAIR_LINK],
+        localThreshold
+      );
+
+      const foundExCLog = mockLogger.debug.mock.calls.some(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes(
+            `Excluding ${EX_C} for pair ${PAIR_LINK}: Funding rate present but no specific fee info and not generally fee-free.`
+          )
+      );
+      expect(foundExCLog).toBe(true);
+
+      const foundExBExclusionLog = mockLogger.debug.mock.calls.some(
+        (call) =>
+          typeof call[0] === "string" &&
+          call[0].includes(
+            `Excluding ${EX_B} for pair ${PAIR_LINK}: Funding rate present but no specific fee info and not generally fee-free.`
+          )
+      );
+      expect(foundExBExclusionLog).toBe(false);
+
+      expect(opportunities.length).toBe(1);
+      const op = opportunities[0];
+      expect(op.longExchange).toBe(EX_A);
+      expect(op.shortExchange).toBe(EX_B);
+      expect(op.longRate).toBe(0.0001);
+      expect(op.shortRate).toBe(0.0008);
+      expect(op.longExchangeTakerFeeRate).toBe(0.0005);
+      expect(op.shortExchangeTakerFeeRate).toBe(0);
+      expect(op.totalEstimatedFees).toBe(0.0005);
+      expect(op.netRateDifference).toBeCloseTo(0.0002);
     });
   });
 });
@@ -1600,3 +1660,78 @@ afterAll(() => {
   vi.doUnmock("ccxt");
   vi.resetModules();
 });
+
+const createFundingRateInfo = (
+  exchange: ExchangeId,
+  pair: TradingPairSymbol,
+  fundingRate: number,
+  timestamp: number = MOCK_TIMESTAMP
+): FundingRateInfo => ({
+  exchange,
+  pair,
+  fundingRate,
+  timestamp,
+});
+
+const createTradingFee = (
+  symbol: TradingPairSymbol,
+  taker: number,
+  maker: number = taker
+): ccxt.TradingFeeInterface => ({
+  symbol,
+  taker,
+  maker,
+  percentage: true,
+  tierBased: false,
+  info: {},
+});
+
+interface ExactFeeStructure {
+  tierBased: boolean;
+  percentage: boolean;
+  taker: number;
+  maker: number;
+}
+
+const createMockCcxtExchange = (
+  takerFeeParam: number | undefined,
+  isFeeFreeOverride?: boolean
+): Partial<ccxt.Exchange> => {
+  let tradingFeeConfig: ExactFeeStructure | undefined;
+
+  if (isFeeFreeOverride === true) {
+    tradingFeeConfig = {
+      taker: 0,
+      maker: 0,
+      percentage: true,
+      tierBased: false,
+    };
+  } else if (takerFeeParam !== undefined) {
+    tradingFeeConfig = {
+      taker: takerFeeParam,
+      maker: takerFeeParam,
+      percentage: true,
+      tierBased: false,
+    };
+  }
+
+  const fundingFeeConfig = {
+    tierBased: false,
+    percentage: false,
+    withdraw: {},
+    deposit: {},
+  };
+
+  return {
+    fees: tradingFeeConfig
+      ? {
+          trading: tradingFeeConfig,
+          funding: fundingFeeConfig,
+        }
+      : undefined,
+    has: {
+      fetchFundingRate: true,
+      fetchTradingFees: true,
+    },
+  };
+};

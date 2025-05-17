@@ -129,10 +129,14 @@ export class TelegramService implements ITelegramService {
     });
 
     // Start polling only if explicitly enabled and not in test environment
+    const autoStartBasedOnEnv =
+      this.effectiveEnv !== "test" &&
+      this.effectiveEnv !== "production_webhook";
     const shouldStartPolling =
-      options?.startPolling ??
-      (this.effectiveEnv !== "test" &&
-        this.effectiveEnv !== "production_webhook"); // Don't poll if test or webhook prod
+      options?.startPolling === undefined
+        ? autoStartBasedOnEnv
+        : options.startPolling && autoStartBasedOnEnv;
+
     if (shouldStartPolling) {
       this.bot.start();
       this.logger.info("Telegram Bot started in polling mode...");
@@ -212,9 +216,9 @@ export class TelegramService implements ITelegramService {
     // For now, let's assume TypedArbitrageOpportunity has all necessary fields for formatting.
     // The old validation for 'pair', 'longExchange' etc. on the local type might not fully apply.
     // A quick check for `pairSymbol` which is critical.
-    if (!opportunity.pairSymbol) {
+    if (!opportunity.pair) {
       this.logger.error(
-        "Invalid opportunity, missing pairSymbol in TypedArbitrageOpportunity:",
+        "Invalid opportunity, missing pair in TypedArbitrageOpportunity:",
         opportunity
       );
       return;
@@ -222,17 +226,17 @@ export class TelegramService implements ITelegramService {
 
     try {
       // formatOpportunityMessage will now receive TypedArbitrageOpportunity
-      // It needs to be compatible with it (i.e., use opportunity.pairSymbol etc.)
+      // It needs to be compatible with it (i.e., use opportunity.pair etc.)
       const message = formatOpportunityMessage(opportunity);
       await this.bot.api.sendMessage(this.config.chatId, message, {
         parse_mode: "MarkdownV2",
       });
       this.logger.info(
-        `Sent opportunity notification for ${opportunity.pairSymbol} to chat ${this.config.chatId}`
+        `Sent opportunity notification for ${opportunity.pair} to chat ${this.config.chatId}`
       );
     } catch (error) {
       this.logger.error(
-        `Failed to send Telegram opportunity notification for ${opportunity.pairSymbol}:`,
+        `Failed to send Telegram opportunity notification for ${opportunity.pair}:`,
         error
       );
 
