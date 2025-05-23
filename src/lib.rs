@@ -109,7 +109,8 @@ pub async fn scheduled(event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
 // Handler implementations
 
 async fn handle_get_markets(req: Request, env: Env) -> Result<Response> {
-    let exchange_service = match ExchangeService::new(&env) {
+    let custom_env = types::Env::new(env);
+    let exchange_service = match ExchangeService::new(&custom_env) {
         Ok(service) => service,
         Err(e) => return Response::error(format!("Failed to create exchange service: {}", e), 500),
     };
@@ -137,7 +138,8 @@ async fn handle_get_markets(req: Request, env: Env) -> Result<Response> {
 }
 
 async fn handle_get_ticker(req: Request, env: Env) -> Result<Response> {
-    let exchange_service = match ExchangeService::new(&env) {
+    let custom_env = types::Env::new(env);
+    let exchange_service = match ExchangeService::new(&custom_env) {
         Ok(service) => service,
         Err(e) => return Response::error(format!("Failed to create exchange service: {}", e), 500),
     };
@@ -170,7 +172,8 @@ async fn handle_funding_rate(req: Request, env: Env) -> Result<Response> {
     let exchange_id = query_params.get("exchange").unwrap_or(&"binance".to_string()).clone();
     let symbol = query_params.get("symbol").unwrap_or(&"BTCUSDT".to_string()).clone();
     
-    let exchange_service = match ExchangeService::new(&env) {
+    let custom_env = types::Env::new(env);
+    let exchange_service = match ExchangeService::new(&custom_env) {
         Ok(service) => service,
         Err(e) => return Response::error(format!("Failed to create exchange service: {}", e), 500),
     };
@@ -185,8 +188,11 @@ async fn handle_funding_rate(req: Request, env: Env) -> Result<Response> {
 }
 
 async fn handle_find_opportunities(mut req: Request, env: Env) -> Result<Response> {
+    // Create custom env first 
+    let custom_env = types::Env::new(env);
+    
     // Parse configuration from environment
-    let exchanges_str = env.var("EXCHANGES")?.to_string();
+    let exchanges_str = custom_env.worker_env.var("EXCHANGES")?.to_string();
     let exchanges: Vec<ExchangeIdEnum> = exchanges_str
         .split(',')
         .filter_map(|s| match s.trim() {
@@ -225,7 +231,7 @@ async fn handle_find_opportunities(mut req: Request, env: Env) -> Result<Respons
         .as_f64()
         .unwrap_or(0.01);
 
-    let monitored_pairs_str = env.var("MONITORED_PAIRS_CONFIG")?.to_string();
+    let monitored_pairs_str = custom_env.worker_env.var("MONITORED_PAIRS_CONFIG")?.to_string();
     let monitored_pairs: Vec<StructuredTradingPair> =
         match serde_json::from_str(&monitored_pairs_str) {
             Ok(pairs) => pairs,
@@ -234,7 +240,7 @@ async fn handle_find_opportunities(mut req: Request, env: Env) -> Result<Respons
             }
         };
 
-    let threshold: f64 = env
+    let threshold: f64 = custom_env.worker_env
         .var("ARBITRAGE_THRESHOLD")
         .map(|v| v.to_string())
         .unwrap_or_else(|_| "0.001".to_string())
@@ -242,13 +248,13 @@ async fn handle_find_opportunities(mut req: Request, env: Env) -> Result<Respons
         .unwrap_or(0.001);
 
     // Create services
-    let exchange_service = Arc::new(match ExchangeService::new(&env) {
+    let exchange_service = Arc::new(match ExchangeService::new(&custom_env) {
         Ok(service) => service,
         Err(e) => return Response::error(format!("Failed to create exchange service: {}", e), 500),
     });
 
     let telegram_service = if let (Ok(bot_token), Ok(chat_id)) =
-        (env.var("TELEGRAM_BOT_TOKEN"), env.var("TELEGRAM_CHAT_ID"))
+        (custom_env.worker_env.var("TELEGRAM_BOT_TOKEN"), custom_env.worker_env.var("TELEGRAM_CHAT_ID"))
     {
         Some(Arc::new(TelegramService::new(
             services::telegram::TelegramConfig {
@@ -370,12 +376,12 @@ async fn handle_close_position(_req: Request, env: Env, id: &str) -> Result<Resp
 }
 
 async fn monitor_opportunities_scheduled(env: Env) -> ArbitrageResult<()> {
+    let custom_env = types::Env::new(env);
+    let exchange_service = Arc::new(ExchangeService::new(&custom_env)?);
+
     // Parse configuration from environment
-    let exchanges_str = env
-        .var("EXCHANGES")
-        .map_err(|_| ArbitrageError::config_error("EXCHANGES not configured"))?;
+    let exchanges_str = custom_env.worker_env.var("EXCHANGES")?.to_string();
     let exchanges: Vec<ExchangeIdEnum> = exchanges_str
-        .to_string()
         .split(',')
         .filter_map(|s| match s.trim() {
             "binance" => Some(ExchangeIdEnum::Binance),
@@ -392,15 +398,13 @@ async fn monitor_opportunities_scheduled(env: Env) -> ArbitrageResult<()> {
         ));
     }
 
-    let monitored_pairs_str = env
-        .var("MONITORED_PAIRS_CONFIG")
-        .map_err(|_| ArbitrageError::config_error("MONITORED_PAIRS_CONFIG not configured"))?;
+    let monitored_pairs_str = custom_env.worker_env.var("MONITORED_PAIRS_CONFIG")?.to_string();
     let monitored_pairs: Vec<StructuredTradingPair> =
         serde_json::from_str(&monitored_pairs_str.to_string()).map_err(|e| {
             ArbitrageError::parse_error(format!("Failed to parse monitored pairs: {}", e))
         })?;
 
-    let threshold: f64 = env
+    let threshold: f64 = custom_env.worker_env
         .var("ARBITRAGE_THRESHOLD")
         .map(|v| v.to_string())
         .unwrap_or_else(|_| "0.001".to_string())
@@ -408,10 +412,8 @@ async fn monitor_opportunities_scheduled(env: Env) -> ArbitrageResult<()> {
         .unwrap_or(0.001);
 
     // Create services
-    let exchange_service = Arc::new(ExchangeService::new(&env)?);
-
     let telegram_service = if let (Ok(bot_token), Ok(chat_id)) =
-        (env.var("TELEGRAM_BOT_TOKEN"), env.var("TELEGRAM_CHAT_ID"))
+        (custom_env.worker_env.var("TELEGRAM_BOT_TOKEN"), custom_env.worker_env.var("TELEGRAM_CHAT_ID"))
     {
         Some(Arc::new(TelegramService::new(
             services::telegram::TelegramConfig {

@@ -111,26 +111,33 @@ The Rust codebase has been completely migrated from TypeScript and needs compreh
   - **Overall Coverage: 6.51% (72/1106 lines covered)**
   - Generated HTML coverage report in `coverage/tarpaulin-report.html`
   - Detailed module breakdown documented below
-- [ ] **Task 4**: Create comprehensive unit tests for core modules
+- [x] **Task 4**: Address CodeRabbit review comments from PR #23 ✅ **COMPLETED**
+  - ✅ Fixed Binance API signature generation to include all query parameters
+  - ✅ Replaced JavaScript-specific imports with Rust native time handling
+  - ✅ Fixed Env struct definition confusion and added proper methods
+  - ✅ Replaced Date.now() usage with SystemTime
+  - ✅ Updated all service constructors to use new Env interface
+  - ✅ All tests passing (15 unit + 14 integration tests)
+- [ ] **Task 5**: Create comprehensive unit tests for core modules
 
 ### Phase 2: Core Module Testing
-- [ ] **Task 5**: Add unit tests for `src/lib.rs` (main entry points)
-- [ ] **Task 6**: Add unit tests for `src/services/exchange.rs`
-- [ ] **Task 7**: Add unit tests for `src/services/opportunity.rs`
-- [ ] **Task 8**: Add unit tests for `src/services/positions.rs`
-- [ ] **Task 9**: Add unit tests for `src/services/telegram.rs`
+- [ ] **Task 6**: Add unit tests for `src/lib.rs` (main entry points)
+- [ ] **Task 7**: Add unit tests for `src/services/exchange.rs`
+- [ ] **Task 8**: Add unit tests for `src/services/opportunity.rs`
+- [ ] **Task 9**: Add unit tests for `src/services/positions.rs`
+- [ ] **Task 10**: Add unit tests for `src/services/telegram.rs`
 
 ### Phase 3: Utility and Type Testing
-- [ ] **Task 10**: Add unit tests for `src/utils/error.rs`
-- [ ] **Task 11**: Add unit tests for `src/utils/formatter.rs`
-- [ ] **Task 12**: Add unit tests for `src/utils/logger.rs`
-- [ ] **Task 13**: Add unit tests for `src/types.rs`
+- [ ] **Task 11**: Add unit tests for `src/utils/error.rs`
+- [ ] **Task 12**: Add unit tests for `src/utils/formatter.rs`
+- [ ] **Task 13**: Add unit tests for `src/utils/logger.rs`
+- [ ] **Task 14**: Add unit tests for `src/types.rs`
 
 ### Phase 4: Integration and Coverage
-- [ ] **Task 14**: Enhance integration tests
-- [ ] **Task 15**: Achieve >90% test coverage
-- [ ] **Task 16**: Update CI/CD pipeline for coverage reporting
-- [ ] **Task 17**: Create PR and merge to main
+- [ ] **Task 15**: Enhance integration tests
+- [ ] **Task 16**: Achieve >90% test coverage
+- [ ] **Task 17**: Update CI/CD pipeline for coverage reporting
+- [ ] **Task 18**: Create PR and merge to main
 
 ## Executor's Feedback or Assistance Requests
 
@@ -182,6 +189,35 @@ The Rust codebase has been completely migrated from TypeScript and needs compreh
 
 **No blockers or assistance needed at this time.**
 
+### ✅ Completed: Task 4 - CodeRabbit Review Comments Resolution (2024-01-XX)
+
+**What was accomplished:**
+- Successfully addressed all 4 critical CodeRabbit review comments from PR #23
+- **Fixed Binance API signature generation**: Updated to include all query parameters in signature calculation, not just timestamp
+- **Replaced JavaScript-specific imports**: Removed `worker::js_sys::Date` and replaced with `std::time::SystemTime`
+- **Fixed Env struct definition**: Clarified field naming and added proper methods for KV store access
+- **Updated service constructors**: Modified all handlers to use custom `Env` wrapper instead of direct `worker::Env`
+- **Maintained test compatibility**: All 29 tests still passing (15 unit + 14 integration)
+
+**Technical Details:**
+- Binance signature now properly sorts and includes all query parameters before HMAC-SHA256 generation
+- Time handling now uses Rust native `SystemTime::now().duration_since(UNIX_EPOCH)` for portability
+- Env struct now has clear `worker_env` field with `get_kv_store()` method for better abstraction
+- All handlers in `lib.rs` updated to create `types::Env::new(env)` before passing to services
+
+**Key Insights:**
+- The signature generation fix addresses a critical authentication issue that would cause Binance API failures
+- Removing JavaScript dependencies improves code portability outside WASM environments
+- The Env wrapper provides better abstraction and type safety for environment access
+- All changes maintain backward compatibility with existing test suite
+
+**No blockers or assistance needed at this time.**
+
+**Next Steps:**
+- Task 5: Begin systematic unit test implementation for core modules
+- Priority order: lib.rs → services → utilities → types
+- Target: >85% coverage for services, >90% for utilities
+
 ## Lessons Learned
 
 *This section will be updated with insights gained during the implementation process.*
@@ -210,38 +246,4 @@ The Rust codebase has been completely migrated from TypeScript and needs compreh
 #### 🟡 **Partial Coverage Modules (Priority 2)**
 | Module | Lines | Coverage | Status |
 |--------|-------|----------|---------|
-| `src/utils/formatter.rs` | 76 | 10/76 (13.2%) | Formatting utilities |
-| `src/utils/logger.rs` | 89 | 11/89 (12.4%) | Logging infrastructure |
-
-#### 🟢 **Good Coverage Modules**
-| Module | Lines | Coverage | Status |
-|--------|-------|----------|---------|
-| `src/utils/helpers.rs` | 61 | 51/61 (83.6%) | Helper functions |
-
-### Key Insights
-
-1. **Critical Gap**: Core business logic modules (services) have zero coverage
-2. **Infrastructure**: Utility modules have varying coverage levels
-3. **Test Quality**: Existing tests are well-structured but limited in scope
-4. **Integration vs Unit**: Integration tests don't contribute to line coverage metrics
-
-### Coverage Targets by Phase
-
-#### Phase 2: Core Module Testing (Target: >85% each)
-- `src/lib.rs`: 0% → 85%+ (HTTP handlers, routing)
-- `src/services/exchange.rs`: 0% → 85%+ (API integration)
-- `src/services/opportunity.rs`: 0% → 85%+ (Business logic)
-- `src/services/positions.rs`: 0% → 85%+ (Position management)
-- `src/services/telegram.rs`: 0% → 85%+ (Bot integration)
-
-#### Phase 3: Utility and Type Testing (Target: >90% each)
-- `src/utils/error.rs`: 0% → 90%+ (Error handling)
-- `src/utils/formatter.rs`: 13% → 90%+ (Formatting)
-- `src/utils/logger.rs`: 12% → 90%+ (Logging)
-- `src/types.rs`: 0% → 90%+ (Type definitions)
-- `src/utils/helpers.rs`: 84% → 95%+ (Complete coverage)
-
-#### Phase 4: Integration and Coverage (Target: >90% overall)
-- Overall project coverage: 6.51% → 90%+
-- Enhanced integration tests for end-to-end workflows
-- Performance and stress testing
+| `src/utils/formatter.rs`

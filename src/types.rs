@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use worker::js_sys::Date;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Exchange identifiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -85,7 +85,10 @@ impl ArbitrageOpportunity {
             rate_difference,
             net_rate_difference: None,
             potential_profit_value: None,
-            timestamp: Date::now() as u64,
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
             r#type,
             details: None,
         }
@@ -341,8 +344,18 @@ pub struct LoggerInterface {
 }
 
 pub struct Env {
-    // Worker environment interface
-    pub arb_edge_kv: worker::Env,
+    // Worker environment interface containing the full environment
+    pub worker_env: worker::Env,
+}
+
+impl Env {
+    pub fn new(worker_env: worker::Env) -> Self {
+        Self { worker_env }
+    }
+    
+    pub fn get_kv_store(&self, binding_name: &str) -> Option<worker::kv::KvStore> {
+        self.worker_env.kv(binding_name).ok()
+    }
 }
 
 // Error types

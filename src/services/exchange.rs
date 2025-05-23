@@ -4,7 +4,6 @@ use chrono::Utc;
 use reqwest::{Client, Method, Url};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use worker::Env;
 
 use crate::types::*;
 use crate::utils::{ArbitrageError, ArbitrageResult};
@@ -107,11 +106,10 @@ impl ExchangeService {
     #[allow(clippy::result_large_err)]
     pub fn new(env: &Env) -> ArbitrageResult<Self> {
         let client = Client::new();
-        let kv = env.kv("ARBITRAGE_KV").map_err(|e| {
-            ArbitrageError::internal_error(format!(
-                "Failed to get KV store: {}",
-                e
-            ))
+        let kv = env.get_kv_store("ARBITRAGE_KV").ok_or_else(|| {
+            ArbitrageError::internal_error(
+                "Failed to get KV store: ARBITRAGE_KV binding not found".to_string()
+            )
         })?;
 
         Ok(Self {
@@ -136,27 +134,34 @@ impl ExchangeService {
         let mut request_url = Url::parse(&url)
             .map_err(|e| ArbitrageError::network_error(format!("Invalid URL: {}", e)))?;
 
-        // Add query parameters
+        // Collect all query parameters
+        let mut query_params = Vec::new();
+        
+        // Add query parameters from the params argument
         if let Some(params) = params {
             if let Some(obj) = params.as_object() {
                 for (key, value) in obj {
                     if let Some(str_val) = value.as_str() {
-                        request_url.query_pairs_mut().append_pair(key, str_val);
+                        query_params.push(format!("{}={}", key, str_val));
                     } else {
-                        request_url
-                            .query_pairs_mut()
-                            .append_pair(key, &value.to_string());
+                        query_params.push(format!("{}={}", key, value.to_string()));
                     }
                 }
             }
         }
 
-        let mut request = self.client.request(method, request_url);
+        let mut request = self.client.request(method.clone(), request_url.clone());
 
         // Add authentication if provided
         if let Some(creds) = auth {
             let timestamp = Utc::now().timestamp_millis();
-            let query_string = format!("timestamp={}", timestamp);
+            
+            // Add timestamp to query parameters
+            query_params.push(format!("timestamp={}", timestamp));
+            
+            // Sort query parameters for consistent signature generation
+            query_params.sort();
+            let query_string = query_params.join("&");
 
             // Create signature
             let mut mac = Hmac::<Sha256>::new_from_slice(creds.secret.as_bytes()).map_err(|e| {
@@ -165,11 +170,17 @@ impl ExchangeService {
             mac.update(query_string.as_bytes());
             let signature = hex::encode(mac.finalize().into_bytes());
 
+            // Rebuild the request URL with all parameters including signature
+            request_url.set_query(Some(&format!("{}&signature={}", query_string, signature)));
+            request = self.client.request(method.clone(), request_url);
             request = request.header("X-MBX-APIKEY", &creds.api_key);
-            request = request.query(&[
-                ("timestamp", timestamp.to_string()),
-                ("signature", signature),
-            ]);
+        } else {
+            // If no auth, just add the regular parameters to the URL
+            if !query_params.is_empty() {
+                let query_string = query_params.join("&");
+                request_url.set_query(Some(&query_string));
+                request = self.client.request(method.clone(), request_url);
+            }
         }
 
         let response = request
@@ -518,8 +529,8 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_balance(
         &self,
-        _exchange_id: &str,
-        _credentials: &ExchangeCredentials,
+        exchange_id: &str,
+        credentials: &ExchangeCredentials,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -527,12 +538,12 @@ impl ExchangeInterface for ExchangeService {
 
     async fn create_order(
         &self,
-        _exchange_id: &str,
-        _credentials: &ExchangeCredentials,
-        _symbol: &str,
-        _side: &str,
-        _amount: f64,
-        _price: Option<f64>,
+        exchange_id: &str,
+        credentials: &ExchangeCredentials,
+        symbol: &str,
+        side: &str,
+        amount: f64,
+        price: Option<f64>,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -540,10 +551,10 @@ impl ExchangeInterface for ExchangeService {
 
     async fn cancel_order(
         &self,
-        _exchange_id: &str,
-        _credentials: &ExchangeCredentials,
-        _order_id: &str,
-        _symbol: &str,
+        exchange_id: &str,
+        credentials: &ExchangeCredentials,
+        order_id: &str,
+        symbol: &str,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -551,9 +562,9 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_open_orders(
         &self,
-        _exchange_id: &str,
-        _credentials: &ExchangeCredentials,
-        _symbol: Option<&str>,
+        exchange_id: &str,
+        credentials: &ExchangeCredentials,
+        symbol: Option<&str>,
     ) -> ArbitrageResult<Vec<Value>> {
         // Placeholder implementation
         Ok(vec![])
@@ -561,9 +572,9 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_open_positions(
         &self,
-        _exchange_id: &str,
-        _credentials: &ExchangeCredentials,
-        _symbol: Option<&str>,
+        exchange_id: &str,
+        credentials: &ExchangeCredentials,
+        symbol: Option<&str>,
     ) -> ArbitrageResult<Vec<Value>> {
         // Placeholder implementation
         Ok(vec![])
@@ -571,10 +582,10 @@ impl ExchangeInterface for ExchangeService {
 
     async fn set_leverage(
         &self,
-        _exchange_id: &str,
-        _credentials: &ExchangeCredentials,
-        _symbol: &str,
-        _leverage: u32,
+        exchange_id: &str,
+        credentials: &ExchangeCredentials,
+        symbol: &str,
+        leverage: u32,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -582,9 +593,9 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_trading_fees(
         &self,
-        _exchange_id: &str,
-        _credentials: &ExchangeCredentials,
-        _symbol: &str,
+        exchange_id: &str,
+        credentials: &ExchangeCredentials,
+        symbol: &str,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
