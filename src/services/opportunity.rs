@@ -178,9 +178,9 @@ impl OpportunityService {
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     details: Some(format!(
                                         "Funding rate arbitrage: Long {} ({}%) / Short {} ({}%)",
-                                        long_exchange.to_string(),
+                                        long_exchange,
                                         (long_rate * 100.0 * 10000.0).round() / 10000.0,
-                                        short_exchange.to_string(),
+                                        short_exchange,
                                         (short_rate * 100.0 * 10000.0).round() / 10000.0
                                     )),
                                 };

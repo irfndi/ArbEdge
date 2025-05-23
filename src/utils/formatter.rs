@@ -54,7 +54,7 @@ pub fn format_timestamp(timestamp: u64) -> String {
     #[cfg(not(test))]
     {
         let datetime =
-            DateTime::from_timestamp_millis(timestamp as i64).unwrap_or_else(|| Utc::now());
+            DateTime::from_timestamp_millis(timestamp as i64).unwrap_or_else(Utc::now);
         datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
     }
 }
@@ -91,7 +91,7 @@ pub fn format_opportunity_message(opportunity: &ArbitrageOpportunity) -> String 
         .details
         .as_ref()
         .map(|d| escape_markdown_v2(d))
-        .unwrap_or_else(|| "".to_string());
+        .unwrap_or_default();
 
     // Build the message using MarkdownV2 syntax
     let mut message = format!(

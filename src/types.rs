@@ -8,6 +8,7 @@ use worker::js_sys::Date;
 /// Exchange identifiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[allow(clippy::upper_case_acronyms)]
 pub enum ExchangeIdEnum {
     Binance,
     Bybit,

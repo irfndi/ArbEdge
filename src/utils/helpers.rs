@@ -127,11 +127,7 @@ pub fn moving_average(values: &[f64], window_size: usize) -> Vec<f64> {
 
     let mut result = Vec::new();
     for i in 0..values.len() {
-        let start = if i + 1 >= window_size {
-            i + 1 - window_size
-        } else {
-            0
-        };
+        let start = (i + 1).saturating_sub(window_size);
         let end = i + 1;
         let window = &values[start..end];
         let avg = window.iter().sum::<f64>() / window.len() as f64;
@@ -173,8 +169,20 @@ mod tests {
 
     #[test]
     fn test_round_to_decimal_places() {
-        assert_eq!(round_to_decimal_places(3.14159, 2), 3.14);
-        assert_eq!(round_to_decimal_places(3.14159, 4), 3.1416);
+        let pi_2_decimal = round_to_decimal_places(std::f64::consts::PI, 2);
+        let pi_4_decimal = round_to_decimal_places(std::f64::consts::PI, 4);
+        
+        // Test that the function works correctly by checking the rounded values
+        // Compute expected values to avoid hardcoded PI approximations
+        let expected_2_decimal = (std::f64::consts::PI * 100.0).round() / 100.0;
+        let expected_4_decimal = (std::f64::consts::PI * 10000.0).round() / 10000.0;
+        
+        assert_eq!(pi_2_decimal, expected_2_decimal);
+        assert_eq!(pi_4_decimal, expected_4_decimal);
+        
+        // Also test with a simple known value
+        assert_eq!(round_to_decimal_places(2.56789, 2), 2.57);
+        assert_eq!(round_to_decimal_places(2.56789, 3), 2.568);
     }
 
     #[test]

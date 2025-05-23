@@ -518,8 +518,8 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_balance(
         &self,
-        exchange_id: &str,
-        credentials: &ExchangeCredentials,
+        _exchange_id: &str,
+        _credentials: &ExchangeCredentials,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -527,12 +527,12 @@ impl ExchangeInterface for ExchangeService {
 
     async fn create_order(
         &self,
-        exchange_id: &str,
-        credentials: &ExchangeCredentials,
-        symbol: &str,
-        side: &str,
-        amount: f64,
-        price: Option<f64>,
+        _exchange_id: &str,
+        _credentials: &ExchangeCredentials,
+        _symbol: &str,
+        _side: &str,
+        _amount: f64,
+        _price: Option<f64>,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -540,10 +540,10 @@ impl ExchangeInterface for ExchangeService {
 
     async fn cancel_order(
         &self,
-        exchange_id: &str,
-        credentials: &ExchangeCredentials,
-        order_id: &str,
-        symbol: &str,
+        _exchange_id: &str,
+        _credentials: &ExchangeCredentials,
+        _order_id: &str,
+        _symbol: &str,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -551,9 +551,9 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_open_orders(
         &self,
-        exchange_id: &str,
-        credentials: &ExchangeCredentials,
-        symbol: Option<&str>,
+        _exchange_id: &str,
+        _credentials: &ExchangeCredentials,
+        _symbol: Option<&str>,
     ) -> ArbitrageResult<Vec<Value>> {
         // Placeholder implementation
         Ok(vec![])
@@ -561,9 +561,9 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_open_positions(
         &self,
-        exchange_id: &str,
-        credentials: &ExchangeCredentials,
-        symbol: Option<&str>,
+        _exchange_id: &str,
+        _credentials: &ExchangeCredentials,
+        _symbol: Option<&str>,
     ) -> ArbitrageResult<Vec<Value>> {
         // Placeholder implementation
         Ok(vec![])
@@ -571,10 +571,10 @@ impl ExchangeInterface for ExchangeService {
 
     async fn set_leverage(
         &self,
-        exchange_id: &str,
-        credentials: &ExchangeCredentials,
-        symbol: &str,
-        leverage: u32,
+        _exchange_id: &str,
+        _credentials: &ExchangeCredentials,
+        _symbol: &str,
+        _leverage: u32,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))
@@ -582,9 +582,9 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_trading_fees(
         &self,
-        exchange_id: &str,
-        credentials: &ExchangeCredentials,
-        symbol: &str,
+        _exchange_id: &str,
+        _credentials: &ExchangeCredentials,
+        _symbol: &str,
     ) -> ArbitrageResult<Value> {
         // Placeholder implementation
         Ok(json!({}))

@@ -64,11 +64,21 @@ mod tests {
 
         for (method, path) in routes {
             match (method, path) {
-                ("GET", "/health") => assert!(true, "Health endpoint should be GET"),
-                ("POST", "/find-opportunities") => assert!(true, "Find opportunities should be POST"),
-                ("POST", "/webhook") => assert!(true, "Webhook should be POST"),
-                ("POST", "/positions") => assert!(true, "Create position should be POST"),
-                ("GET", "/positions") => assert!(true, "Get positions should be GET"),
+                ("GET", "/health") => {
+                    // Health endpoint should be GET - this is correct
+                }
+                ("POST", "/find-opportunities") => {
+                    // Find opportunities should be POST - this is correct
+                }
+                ("POST", "/webhook") => {
+                    // Webhook should be POST - this is correct
+                }
+                ("POST", "/positions") => {
+                    // Create position should be POST - this is correct
+                }
+                ("GET", "/positions") => {
+                    // Get positions should be GET - this is correct
+                }
                 (_, path) if path.starts_with("/positions/") => {
                     assert!(["GET", "PUT", "DELETE"].contains(&method), 
                            "Position operations should be GET, PUT, or DELETE");

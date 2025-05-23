@@ -176,9 +176,11 @@ impl Logger {
 }
 
 /// Global logger instance
+#[allow(static_mut_refs)]
 static mut GLOBAL_LOGGER: Option<Logger> = None;
 
 /// Initialize the global logger
+#[allow(static_mut_refs)]
 pub fn init_logger(level: LogLevel) {
     unsafe {
         GLOBAL_LOGGER = Some(Logger::new(level));
@@ -186,6 +188,7 @@ pub fn init_logger(level: LogLevel) {
 }
 
 /// Get a reference to the global logger
+#[allow(static_mut_refs)]
 pub fn logger() -> &'static Logger {
     unsafe {
         GLOBAL_LOGGER.as_ref().unwrap_or_else(|| {

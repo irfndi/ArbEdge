@@ -22,7 +22,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let url = req.url()?;
     let path = url.path();
 
-    match (req.method(), path.as_ref()) {
+    match (req.method(), path) {
         // Health check
         (Method::Get, "/health") => {
             Response::ok("ArbEdge Rust Worker is running!")
@@ -214,14 +214,14 @@ async fn handle_find_opportunities(mut req: Request, env: Env) -> Result<Respons
         }
     };
 
-    let trading_pairs: Vec<String> = request_data["trading_pairs"]
+    let _trading_pairs: Vec<String> = request_data["trading_pairs"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
         .filter_map(|v| v.as_str().map(|s| s.to_string()))
         .collect();
 
-    let min_threshold = request_data["min_threshold"]
+    let _min_threshold = request_data["min_threshold"]
         .as_f64()
         .unwrap_or(0.01);
 

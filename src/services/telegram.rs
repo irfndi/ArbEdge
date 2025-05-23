@@ -75,7 +75,7 @@ impl TelegramService {
         let date_escaped = self.escape_markdown_v2(&self.format_timestamp(opportunity.timestamp));
         let details_escaped = opportunity.details.as_ref()
             .map(|d| self.escape_markdown_v2(d))
-            .unwrap_or_else(|| "".to_string());
+            .unwrap_or_default();
 
         // Build the message using MarkdownV2 syntax
         let mut message = format!(
@@ -183,7 +183,7 @@ impl TelegramService {
 
     fn format_timestamp(&self, timestamp: u64) -> String {
         let datetime = DateTime::from_timestamp_millis(timestamp as i64)
-            .unwrap_or_else(|| Utc::now());
+            .unwrap_or_else(Utc::now);
         datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
     }
 
