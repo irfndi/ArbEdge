@@ -92,13 +92,14 @@ pub fn approximately_equal(a: f64, b: f64, tolerance: f64) -> bool {
 }
 
 /// Calculates the absolute percentage difference between two values
-pub fn percentage_difference(value1: f64, value2: f64) -> f64 {
+/// Returns None when one value is zero and the other is not (undefined percentage)
+pub fn percentage_difference(value1: f64, value2: f64) -> Option<f64> {
     if value1 == 0.0 && value2 == 0.0 {
-        0.0
+        Some(0.0)
     } else if value1 == 0.0 || value2 == 0.0 {
-        f64::INFINITY
+        None // Undefined percentage difference when one value is zero
     } else {
-        ((value1 - value2).abs() / ((value1 + value2) / 2.0)) * 100.0
+        Some(((value1 - value2).abs() / ((value1 + value2) / 2.0)) * 100.0)
     }
 }
 
@@ -208,9 +209,11 @@ mod tests {
     #[test]
     fn test_percentage_difference() {
         let expected = 200.0 * 10.0 / 190.0; // ~10.526315789473685
-        let actual = percentage_difference(100.0, 90.0);
+        let actual = percentage_difference(100.0, 90.0).unwrap();
         assert!(approximately_equal(actual, expected, 1e-10));
-        assert_eq!(percentage_difference(0.0, 0.0), 0.0);
+        assert_eq!(percentage_difference(0.0, 0.0), Some(0.0));
+        assert_eq!(percentage_difference(100.0, 0.0), None);
+        assert_eq!(percentage_difference(0.0, 100.0), None);
     }
 
     #[test]

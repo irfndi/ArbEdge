@@ -37,8 +37,6 @@ pub enum ErrorKind {
     TelegramError,
     NotImplemented,
     Serialization,
-    Exchange,
-    Database,
     Internal,
 }
 

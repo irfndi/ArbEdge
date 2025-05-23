@@ -34,7 +34,7 @@ impl PositionsService {
             updated_at: now,
         };
 
-        // Store in KV
+        // Store position
         let key = format!("position:{}", id);
         let value = serde_json::to_string(&position).map_err(|e| {
             ArbitrageError::parse_error(format!("Failed to serialize position: {}", e))
@@ -50,6 +50,9 @@ impl PositionsService {
             .map_err(|e| {
                 ArbitrageError::database_error(format!("Failed to execute KV put: {}", e))
             })?;
+
+        // Update position index
+        self.add_to_position_index(&id).await?;
 
         Ok(position)
     }
@@ -133,11 +136,17 @@ impl PositionsService {
     }
 
     pub async fn get_all_positions(&self) -> ArbitrageResult<Vec<ArbitragePosition>> {
-        // Note: This is a simplified implementation. In a real scenario, you'd want to
-        // maintain an index of position IDs or use KV list operations if available
-        // For now, this returns an empty vector as KV doesn't have a native list operation
-        // In production, you'd maintain a separate index key with all position IDs
-        Ok(Vec::new())
+        // Get position IDs from index
+        let position_ids = self.get_position_index().await?;
+        let mut positions = Vec::new();
+
+        for id in position_ids {
+            if let Some(position) = self.get_position(&id).await? {
+                positions.push(position);
+            }
+        }
+
+        Ok(positions)
     }
 
     pub async fn get_open_positions(&self) -> ArbitrageResult<Vec<ArbitragePosition>> {
@@ -152,6 +161,58 @@ impl PositionsService {
         let positions = self.get_open_positions().await?;
         let total_pnl = positions.iter().filter_map(|pos| pos.pnl).sum();
         Ok(total_pnl)
+    }
+
+    // Helper methods for position index management
+    async fn get_position_index(&self) -> ArbitrageResult<Vec<String>> {
+        match self.kv_store.get("positions:index").text().await {
+            Ok(Some(value)) => {
+                let ids: Vec<String> = serde_json::from_str(&value).map_err(|e| {
+                    ArbitrageError::parse_error(format!("Failed to deserialize position index: {}", e))
+                })?;
+                Ok(ids)
+            }
+            Ok(None) => Ok(Vec::new()),
+            Err(e) => Err(ArbitrageError::database_error(format!(
+                "Failed to get position index: {}",
+                e
+            ))),
+        }
+    }
+
+    async fn add_to_position_index(&self, position_id: &str) -> ArbitrageResult<()> {
+        let mut index = self.get_position_index().await?;
+        if !index.contains(&position_id.to_string()) {
+            index.push(position_id.to_string());
+            self.save_position_index(&index).await?;
+        }
+        Ok(())
+    }
+
+    async fn remove_from_position_index(&self, position_id: &str) -> ArbitrageResult<()> {
+        let mut index = self.get_position_index().await?;
+        index.retain(|id| id != position_id);
+        self.save_position_index(&index).await?;
+        Ok(())
+    }
+
+    async fn save_position_index(&self, index: &[String]) -> ArbitrageResult<()> {
+        let value = serde_json::to_string(index).map_err(|e| {
+            ArbitrageError::parse_error(format!("Failed to serialize position index: {}", e))
+        })?;
+
+        self.kv_store
+            .put("positions:index", value)
+            .map_err(|e| {
+                ArbitrageError::database_error(format!("Failed to store position index: {}", e))
+            })?
+            .execute()
+            .await
+            .map_err(|e| {
+                ArbitrageError::database_error(format!("Failed to execute position index put: {}", e))
+            })?;
+
+        Ok(())
     }
 }
 

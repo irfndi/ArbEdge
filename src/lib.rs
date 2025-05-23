@@ -14,6 +14,7 @@ use std::sync::Arc;
 use types::{ExchangeIdEnum, StructuredTradingPair};
 use utils::{ArbitrageError, ArbitrageResult};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
@@ -71,16 +72,28 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
         (Method::Get, path) if path.starts_with("/positions/") => {
             let id = path.strip_prefix("/positions/").unwrap();
+            // Validate UUID format
+            if Uuid::parse_str(id).is_err() {
+                return Response::error("Invalid position ID format. Must be a valid UUID.", 400);
+            }
             handle_get_position(req, env, id).await
         }
 
         (Method::Put, path) if path.starts_with("/positions/") => {
             let id = path.strip_prefix("/positions/").unwrap();
+            // Validate UUID format
+            if Uuid::parse_str(id).is_err() {
+                return Response::error("Invalid position ID format. Must be a valid UUID.", 400);
+            }
             handle_update_position(req, env, id).await
         }
 
         (Method::Delete, path) if path.starts_with("/positions/") => {
             let id = path.strip_prefix("/positions/").unwrap();
+            // Validate UUID format
+            if Uuid::parse_str(id).is_err() {
+                return Response::error("Invalid position ID format. Must be a valid UUID.", 400);
+            }
             handle_close_position(req, env, id).await
         }
 
@@ -104,6 +117,72 @@ pub async fn scheduled(event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
             console_log!("Unknown scheduled event: {}", event.cron());
         }
     }
+}
+
+// Helper functions to reduce code duplication
+
+/// Parse exchanges from environment string, returning error if less than two
+fn parse_exchanges_from_env(exchanges_str: &str) -> std::result::Result<Vec<ExchangeIdEnum>, ArbitrageError> {
+    let exchanges: Vec<ExchangeIdEnum> = exchanges_str
+        .split(',')
+        .filter_map(|s| match s.trim() {
+            "binance" => Some(ExchangeIdEnum::Binance),
+            "bybit" => Some(ExchangeIdEnum::Bybit),
+            "okx" => Some(ExchangeIdEnum::OKX),
+            "bitget" => Some(ExchangeIdEnum::Bitget),
+            _ => None,
+        })
+        .collect();
+
+    if exchanges.len() < 2 {
+        Err(ArbitrageError::config_error("At least two exchanges must be configured"))
+    } else {
+        Ok(exchanges)
+    }
+}
+
+/// Create OpportunityService by reading environment variables and initializing services
+async fn create_opportunity_service(custom_env: &types::Env) -> ArbitrageResult<OpportunityService> {
+    // Parse configuration from environment
+    let exchanges_str = custom_env.worker_env.var("EXCHANGES")?.to_string();
+    let exchanges = parse_exchanges_from_env(&exchanges_str)?;
+
+    let monitored_pairs_str = custom_env.worker_env.var("MONITORED_PAIRS_CONFIG")?.to_string();
+    let monitored_pairs: Vec<StructuredTradingPair> =
+        serde_json::from_str(&monitored_pairs_str).map_err(|e| {
+            ArbitrageError::parse_error(format!("Failed to parse monitored pairs: {}", e))
+        })?;
+
+    let threshold: f64 = custom_env.worker_env
+        .var("ARBITRAGE_THRESHOLD")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|_| "0.001".to_string())
+        .parse()
+        .unwrap_or(0.001);
+
+    // Create services
+    let exchange_service = Arc::new(ExchangeService::new(custom_env)?);
+
+    let telegram_service = if let (Ok(bot_token), Ok(chat_id)) =
+        (custom_env.worker_env.var("TELEGRAM_BOT_TOKEN"), custom_env.worker_env.var("TELEGRAM_CHAT_ID"))
+    {
+        Some(Arc::new(TelegramService::new(
+            services::telegram::TelegramConfig {
+                bot_token: bot_token.to_string(),
+                chat_id: chat_id.to_string(),
+            },
+        )))
+    } else {
+        None
+    };
+
+    let opportunity_config = OpportunityServiceConfig {
+        exchanges,
+        monitored_pairs,
+        threshold,
+    };
+
+    Ok(OpportunityService::new(opportunity_config, exchange_service, telegram_service))
 }
 
 // Handler implementations
@@ -191,24 +270,7 @@ async fn handle_find_opportunities(mut req: Request, env: Env) -> Result<Respons
     // Create custom env first 
     let custom_env = types::Env::new(env);
     
-    // Parse configuration from environment
-    let exchanges_str = custom_env.worker_env.var("EXCHANGES")?.to_string();
-    let exchanges: Vec<ExchangeIdEnum> = exchanges_str
-        .split(',')
-        .filter_map(|s| match s.trim() {
-            "binance" => Some(ExchangeIdEnum::Binance),
-            "bybit" => Some(ExchangeIdEnum::Bybit),
-            "okx" => Some(ExchangeIdEnum::OKX),
-            "bitget" => Some(ExchangeIdEnum::Bitget),
-            _ => None,
-        })
-        .collect();
-
-    if exchanges.len() < 2 {
-        return Response::error("At least two exchanges must be configured", 400);
-    }
-
-    // Parse request body for trading pairs
+    // Parse request body for trading pairs (optional)
     let request_data: serde_json::Value = match req.json().await {
         Ok(data) => data,
         Err(_) => {
@@ -231,49 +293,11 @@ async fn handle_find_opportunities(mut req: Request, env: Env) -> Result<Respons
         .as_f64()
         .unwrap_or(0.01);
 
-    let monitored_pairs_str = custom_env.worker_env.var("MONITORED_PAIRS_CONFIG")?.to_string();
-    let monitored_pairs: Vec<StructuredTradingPair> =
-        match serde_json::from_str(&monitored_pairs_str) {
-            Ok(pairs) => pairs,
-            Err(e) => {
-                return Response::error(format!("Failed to parse monitored pairs: {}", e), 400)
-            }
-        };
-
-    let threshold: f64 = custom_env.worker_env
-        .var("ARBITRAGE_THRESHOLD")
-        .map(|v| v.to_string())
-        .unwrap_or_else(|_| "0.001".to_string())
-        .parse()
-        .unwrap_or(0.001);
-
-    // Create services
-    let exchange_service = Arc::new(match ExchangeService::new(&custom_env) {
+    // Create opportunity service using helper
+    let opportunity_service = match create_opportunity_service(&custom_env).await {
         Ok(service) => service,
-        Err(e) => return Response::error(format!("Failed to create exchange service: {}", e), 500),
-    });
-
-    let telegram_service = if let (Ok(bot_token), Ok(chat_id)) =
-        (custom_env.worker_env.var("TELEGRAM_BOT_TOKEN"), custom_env.worker_env.var("TELEGRAM_CHAT_ID"))
-    {
-        Some(Arc::new(TelegramService::new(
-            services::telegram::TelegramConfig {
-                bot_token: bot_token.to_string(),
-                chat_id: chat_id.to_string(),
-            },
-        )))
-    } else {
-        None
+        Err(e) => return Response::error(format!("Failed to create opportunity service: {}", e), 500),
     };
-
-    let opportunity_config = OpportunityServiceConfig {
-        exchanges,
-        monitored_pairs,
-        threshold,
-    };
-
-    let opportunity_service =
-        OpportunityService::new(opportunity_config, exchange_service, telegram_service);
 
     // Find opportunities
     match opportunity_service.monitor_opportunities().await {
@@ -377,62 +401,9 @@ async fn handle_close_position(_req: Request, env: Env, id: &str) -> Result<Resp
 
 async fn monitor_opportunities_scheduled(env: Env) -> ArbitrageResult<()> {
     let custom_env = types::Env::new(env);
-    let exchange_service = Arc::new(ExchangeService::new(&custom_env)?);
-
-    // Parse configuration from environment
-    let exchanges_str = custom_env.worker_env.var("EXCHANGES")?.to_string();
-    let exchanges: Vec<ExchangeIdEnum> = exchanges_str
-        .split(',')
-        .filter_map(|s| match s.trim() {
-            "binance" => Some(ExchangeIdEnum::Binance),
-            "bybit" => Some(ExchangeIdEnum::Bybit),
-            "okx" => Some(ExchangeIdEnum::OKX),
-            "bitget" => Some(ExchangeIdEnum::Bitget),
-            _ => None,
-        })
-        .collect();
-
-    if exchanges.len() < 2 {
-        return Err(ArbitrageError::config_error(
-            "At least two exchanges must be configured",
-        ));
-    }
-
-    let monitored_pairs_str = custom_env.worker_env.var("MONITORED_PAIRS_CONFIG")?.to_string();
-    let monitored_pairs: Vec<StructuredTradingPair> =
-        serde_json::from_str(&monitored_pairs_str.to_string()).map_err(|e| {
-            ArbitrageError::parse_error(format!("Failed to parse monitored pairs: {}", e))
-        })?;
-
-    let threshold: f64 = custom_env.worker_env
-        .var("ARBITRAGE_THRESHOLD")
-        .map(|v| v.to_string())
-        .unwrap_or_else(|_| "0.001".to_string())
-        .parse()
-        .unwrap_or(0.001);
-
-    // Create services
-    let telegram_service = if let (Ok(bot_token), Ok(chat_id)) =
-        (custom_env.worker_env.var("TELEGRAM_BOT_TOKEN"), custom_env.worker_env.var("TELEGRAM_CHAT_ID"))
-    {
-        Some(Arc::new(TelegramService::new(
-            services::telegram::TelegramConfig {
-                bot_token: bot_token.to_string(),
-                chat_id: chat_id.to_string(),
-            },
-        )))
-    } else {
-        None
-    };
-
-    let opportunity_config = OpportunityServiceConfig {
-        exchanges,
-        monitored_pairs,
-        threshold,
-    };
-
-    let opportunity_service =
-        OpportunityService::new(opportunity_config, exchange_service, telegram_service);
+    
+    // Create opportunity service using helper
+    let opportunity_service = create_opportunity_service(&custom_env).await?;
 
     // Find and process opportunities
     let opportunities = opportunity_service.monitor_opportunities().await?;

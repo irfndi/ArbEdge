@@ -515,75 +515,89 @@ impl ExchangeInterface for ExchangeService {
 
     async fn get_balance(
         &self,
-        _exchange_id: &str,
+        exchange_id: &str,
         _credentials: &ExchangeCredentials,
     ) -> ArbitrageResult<Value> {
-        // Placeholder implementation
-        Ok(json!({}))
+        Err(ArbitrageError::not_implemented(format!(
+            "get_balance not implemented for exchange: {}", 
+            exchange_id
+        )))
     }
 
     async fn create_order(
         &self,
-        _exchange_id: &str,
+        exchange_id: &str,
         _credentials: &ExchangeCredentials,
         _symbol: &str,
         _side: &str,
         _amount: f64,
         _price: Option<f64>,
     ) -> ArbitrageResult<Value> {
-        // Placeholder implementation
-        Ok(json!({}))
+        Err(ArbitrageError::not_implemented(format!(
+            "create_order not implemented for exchange: {}", 
+            exchange_id
+        )))
     }
 
     async fn cancel_order(
         &self,
-        _exchange_id: &str,
+        exchange_id: &str,
         _credentials: &ExchangeCredentials,
         _order_id: &str,
         _symbol: &str,
     ) -> ArbitrageResult<Value> {
-        // Placeholder implementation
-        Ok(json!({}))
+        Err(ArbitrageError::not_implemented(format!(
+            "cancel_order not implemented for exchange: {}", 
+            exchange_id
+        )))
     }
 
     async fn get_open_orders(
         &self,
-        _exchange_id: &str,
+        exchange_id: &str,
         _credentials: &ExchangeCredentials,
         _symbol: Option<&str>,
     ) -> ArbitrageResult<Vec<Value>> {
-        // Placeholder implementation
-        Ok(vec![])
+        Err(ArbitrageError::not_implemented(format!(
+            "get_open_orders not implemented for exchange: {}", 
+            exchange_id
+        )))
     }
 
     async fn get_open_positions(
         &self,
-        _exchange_id: &str,
+        exchange_id: &str,
         _credentials: &ExchangeCredentials,
         _symbol: Option<&str>,
     ) -> ArbitrageResult<Vec<Value>> {
-        // Placeholder implementation
-        Ok(vec![])
+        Err(ArbitrageError::not_implemented(format!(
+            "get_open_positions not implemented for exchange: {}", 
+            exchange_id
+        )))
     }
 
     async fn set_leverage(
         &self,
-        _exchange_id: &str,
+        exchange_id: &str,
         _credentials: &ExchangeCredentials,
         _symbol: &str,
         _leverage: u32,
     ) -> ArbitrageResult<Value> {
-        // Placeholder implementation
-        Ok(json!({}))
+        Err(ArbitrageError::not_implemented(format!(
+            "set_leverage not implemented for exchange: {}", 
+            exchange_id
+        )))
     }
 
     async fn get_trading_fees(
         &self,
-        _exchange_id: &str,
+        exchange_id: &str,
         _credentials: &ExchangeCredentials,
         _symbol: &str,
     ) -> ArbitrageResult<Value> {
-        // Placeholder implementation
-        Ok(json!({}))
+        Err(ArbitrageError::not_implemented(format!(
+            "get_trading_fees not implemented for exchange: {}", 
+            exchange_id
+        )))
     }
 }
