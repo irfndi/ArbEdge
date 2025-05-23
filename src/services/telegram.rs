@@ -1,9 +1,9 @@
 // src/services/telegram.rs
 
-use crate::types::{ArbitrageOpportunity, ArbitrageType, ExchangeIdEnum};
+use crate::types::ArbitrageOpportunity;
 use crate::utils::{ArbitrageError, ArbitrageResult};
-
-use chrono::{DateTime, Utc};
+use crate::utils::formatter::format_opportunity_message;
+use chrono::Utc;
 use reqwest::Client;
 use serde_json::{json, Value};
 
@@ -58,133 +58,8 @@ impl TelegramService {
     }
 
     pub async fn send_opportunity_notification(&self, opportunity: &ArbitrageOpportunity) -> ArbitrageResult<()> {
-        let message = self.format_opportunity_message(opportunity);
+        let message = format_opportunity_message(opportunity);
         self.send_message(&message).await
-    }
-
-    fn format_opportunity_message(&self, opportunity: &ArbitrageOpportunity) -> String {
-        // Extract and format values
-        let pair_escaped = self.escape_markdown_v2(&opportunity.pair);
-        let long_exchange_escaped = self.format_exchange(&opportunity.long_exchange);
-        let short_exchange_escaped = self.format_exchange(&opportunity.short_exchange);
-        let long_rate_escaped = self.format_optional_percentage(&opportunity.long_rate);
-        let short_rate_escaped = self.format_optional_percentage(&opportunity.short_rate);
-        let diff_escaped = self.escape_markdown_v2(&self.format_percentage(opportunity.rate_difference));
-        let net_diff_escaped = self.format_optional_percentage(&opportunity.net_rate_difference);
-        let potential_profit_escaped = self.format_money(&opportunity.potential_profit_value);
-        let date_escaped = self.escape_markdown_v2(&self.format_timestamp(opportunity.timestamp));
-        let details_escaped = opportunity.details.as_ref()
-            .map(|d| self.escape_markdown_v2(d))
-            .unwrap_or_default();
-
-        // Build the message using MarkdownV2 syntax
-        let mut message = format!(
-            "🚨 *Arbitrage Opportunity Detected* 🚨\n\n📈 *Pair:* `{}`",
-            pair_escaped
-        );
-
-        // Format based on opportunity type
-        match opportunity.r#type {
-            ArbitrageType::FundingRate if opportunity.long_exchange.is_some() && opportunity.short_exchange.is_some() => {
-                message.push_str(&format!(
-                    "\n↔️ *Action:* LONG `{}` / SHORT `{}`\n\n*Rates \\(Funding\\):*\n   \\- Long \\({}\\): `{}%`\n   \\- Short \\({}\\): `{}%`\n💰 *Gross Difference:* `{}%`",
-                    long_exchange_escaped,
-                    short_exchange_escaped,
-                    long_exchange_escaped,
-                    long_rate_escaped,
-                    short_exchange_escaped,
-                    short_rate_escaped,
-                    diff_escaped
-                ));
-            }
-            _ => {
-                // Generic message for other types or if specific fields are missing
-                let type_str = match opportunity.r#type {
-                    ArbitrageType::FundingRate => "Funding Rate",
-                    ArbitrageType::SpotFutures => "Spot Futures",
-                    ArbitrageType::CrossExchange => "Cross Exchange",
-                };
-                message.push_str(&format!(
-                    "\nℹ️ *Type:* {}\n💰 *Gross Metric:* `{}%`",
-                    self.escape_markdown_v2(type_str),
-                    diff_escaped
-                ));
-                
-                if opportunity.long_exchange.is_some() {
-                    message.push_str(&format!("\n➡️ *Exchange 1:* `{}`", long_exchange_escaped));
-                }
-                if opportunity.short_exchange.is_some() {
-                    message.push_str(&format!("\n⬅️ *Exchange 2:* `{}`", short_exchange_escaped));
-                }
-            }
-        }
-
-        // Add net difference if available
-        if opportunity.net_rate_difference.is_some() && net_diff_escaped != self.escape_markdown_v2("N/A") {
-            message.push_str(&format!("\n💹 *Net Difference:* `{}%`", net_diff_escaped));
-        }
-
-        // Add potential profit if available
-        if opportunity.potential_profit_value.is_some() && potential_profit_escaped != self.escape_markdown_v2("N/A") {
-            message.push_str(&format!("\n💸 *Potential Profit:* \\~${}", potential_profit_escaped));
-        }
-
-        // Add details if available
-        if !details_escaped.is_empty() {
-            message.push_str(&format!("\n📝 *Details:* {}", details_escaped));
-        }
-
-        // Add timestamp
-        message.push_str(&format!("\n🕒 *Timestamp:* {}", date_escaped));
-
-        message
-    }
-
-    // Helper formatting methods
-    fn escape_markdown_v2(&self, text: &str) -> String {
-        // Characters to escape: _ * [ ] ( ) ~ ` > # + - = | { } . !
-        let chars_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
-        
-        text.chars()
-            .map(|c| {
-                if chars_to_escape.contains(&c) {
-                    format!("\\{}", c)
-                } else {
-                    c.to_string()
-                }
-            })
-            .collect()
-    }
-
-    fn format_exchange(&self, exchange: &Option<ExchangeIdEnum>) -> String {
-        match exchange {
-            Some(exchange) => exchange.to_string().to_uppercase(),
-            None => "N/A".to_string(),
-        }
-    }
-
-    fn format_percentage(&self, value: f64) -> String {
-        format!("{:.4}", value * 100.0)
-    }
-
-    fn format_optional_percentage(&self, value: &Option<f64>) -> String {
-        match value {
-            Some(v) => self.escape_markdown_v2(&self.format_percentage(*v)),
-            None => self.escape_markdown_v2("N/A"),
-        }
-    }
-
-    fn format_money(&self, value: &Option<f64>) -> String {
-        match value {
-            Some(v) => self.escape_markdown_v2(&format!("{:.2}", v)),
-            None => self.escape_markdown_v2("N/A"),
-        }
-    }
-
-    fn format_timestamp(&self, timestamp: u64) -> String {
-        let datetime = DateTime::from_timestamp_millis(timestamp as i64)
-            .unwrap_or_else(Utc::now);
-        datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
     }
 
     // Bot command handlers (for webhook mode)

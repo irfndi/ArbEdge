@@ -1,5 +1,5 @@
 Project Goal: 
-Develop a robust, testable, and maintainable Telegram bot for identifying and executing cryptocurrency arbitrage opportunities using CCXT, deployed on Cloudflare Workers with D1, R2, and KV, all the detail under /docs folder
+Develop a robust, testable, and maintainable Telegram bot for identifying and executing cryptocurrency arbitrage opportunities using native Rust exchange clients, deployed on Cloudflare Workers with KV storage, all the detail under /docs folder
 
 
 Core Principles:
@@ -7,50 +7,47 @@ Core Principles:
 Test-Driven Development (TDD) is Law:
 Write tests before writing implementation code for any new feature or bug fix.
 All tests must pass before any code is considered complete or merged.
-Utilize Vitest for all unit, integration, and (where feasible) end-to-end tests.
+Utilize cargo test for all unit, integration, and (where feasible) end-to-end tests.
 Comprehensive Test Coverage is Mandatory:
-Aim for high test coverage (e.g., >90%) across all critical modules, especially arbitrage logic, CCXT interactions, and Cloudflare service integrations.
-Regularly review coverage reports and address gaps.
+Aim for high test coverage (e.g., >90%) across all critical modules, especially arbitrage logic, exchange interactions, and Cloudflare service integrations.
+Regularly review coverage reports using cargo-tarpaulin and address gaps.
 Linting & Formatting Perfection:
-Code must pass all linting rules (e.g., ESLint with a strict configuration, potentially including TypeScript-ESLint) and be formatted (e.g., Prettier) before commit.
+Code must pass all linting rules (cargo clippy with strict configuration) and be formatted (cargo fmt) before commit.
 Automate this with pre-commit hooks if possible.
 Always Use Latest Stable & Secure Versions:
-Technology: Default to the latest stable versions of Node.js (compatible with Cloudflare Workers), pnpm, Vitest, TypeScript, CCXT, Wrangler, and other dependencies.
-Security: Regularly update dependencies to patch vulnerabilities.
+Technology: Default to the latest stable versions of Rust, cargo, wrangler, and other dependencies.
+Security: Regularly update dependencies using cargo audit to patch vulnerabilities.
 Cloudflare-Native First:
-Deployment: The primary deployment target is Cloudflare Workers. Design and optimize for this environment.
-D1 for Relational Data: Utilize D1 for storing structured, relational data like trade history, user configurations (if complex), and persistent opportunity records.
-R2 for Object Storage: Use R2 for storing larger objects if needed (e.g., detailed execution logs, historical data backups – evaluate if truly necessary for this bot's core functions).
-KV for Ephemeral & Configuration Data: Leverage KV for caching (e.g., exchange rates, available pairs), session data, feature flags, or frequently accessed configuration that isn't highly relational.
-
-Secrets: All API keys (Telegram, CCXT exchanges) and sensitive credentials must be stored securely using Cloudflare Workers secrets.
+Deployment: The primary deployment target is Cloudflare Workers. Design and optimize for this environment using WASM compilation.
+KV for Data Storage: Leverage KV for storing structured data like trade history, user configurations, and persistent opportunity records.
+Secrets: All API keys (Telegram, exchange APIs) and sensitive credentials must be stored securely using Cloudflare Workers secrets.
 
 Modular & Service-Oriented Design:
 Telegram Interface: Isolate Telegram bot command handling and message parsing.
-CCXT Service: Abstract all CCXT library interactions into a dedicated service layer. This layer handles API calls, error normalization, and rate limiting logic.
+Exchange Service: Abstract all exchange API interactions into a dedicated service layer. This layer handles HTTP calls, error normalization, and rate limiting logic.
 Arbitrage Engine: The core arbitrage detection logic should be a distinct module, configurable and testable in isolation.
-Cloudflare Services Clients: Create specific clients or wrappers for interacting with D1, R2, and KV to centralize logic and facilitate mocking.
+Cloudflare Services Clients: Create specific clients or wrappers for interacting with KV to centralize logic and facilitate mocking.
 Robust Error Handling & Logging:
-Implement comprehensive error handling throughout the application.
-Use structured logging. For Workers, this might involve console.log initially, but consider patterns for capturing critical errors (e.g., sending to a third-party logging service if budget allows, or logging summaries to D1/KV for later review).
-Gracefully handle CCXT API errors, network issues, and unexpected responses.
+Implement comprehensive error handling throughout the application using Rust's Result type.
+Use structured logging. For Workers, this might involve console_log! initially, but consider patterns for capturing critical errors.
+Gracefully handle exchange API errors, network issues, and unexpected responses.
 Efficient Resource Usage (Worker Constraints):
 Be mindful of Worker CPU time, memory usage, and execution limits.
-Optimize algorithms and data handling for performance within these constraints.
+Optimize algorithms and data handling for performance within these constraints using Rust's zero-cost abstractions.
 Minimize cold start impact where possible.
-TypeScript for Type Safety:
-Develop the entire bot using TypeScript to catch errors early and improve code maintainability.
-Use strict type checking.
+Rust for Memory Safety and Performance:
+Develop the entire bot using Rust to ensure memory safety, performance, and catch errors at compile time.
+Use strict type checking with Rust's type system.
 Documentation in /docs & In-Code:
 /docs Directory: Maintain detailed documentation for:
 Core arbitrage strategies and logic.
 Setup and configuration (including environment variables).
 Deployment procedures using Wrangler.
-API interactions (Telegram commands, CCXT exchange specifics).
-Data models for D1.
-In-Code: Use JSDoc/TSDoc for all functions, classes, and complex logic sections. Comments should explain why, not just what.
-PNPM for Package Management:
-Strictly use pnpm for all dependency management to ensure efficient and deterministic builds.
+API interactions (Telegram commands, exchange API specifics).
+Data models for KV storage.
+In-Code: Use Rust doc comments (///) for all functions, structs, and complex logic sections. Comments should explain why, not just what.
+Cargo for Package Management:
+Strictly use cargo for all dependency management to ensure efficient and deterministic builds.
 Configuration Management:
 Use environment variables (managed via Wrangler .toml files and secrets) for configuration that changes between environments (dev, staging, prod) or contains sensitive data.
 Consider KV for dynamic runtime configuration if needed.
