@@ -16,6 +16,11 @@ impl KVService {
         }
     }
 
+    /// Get the underlying KvStore for services that need direct access
+    pub fn get_kv_store(&self) -> KvStore {
+        self.kv_store.as_ref().clone()
+    }
+
     /// Get a value from KV store
     pub async fn get(&self, key: &str) -> ArbitrageResult<Option<String>> {
         match self.kv_store.get(key).text().await {

@@ -18,6 +18,7 @@ use crate::utils::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
 use worker::kv::KvStore;
 
 // ============= AI INTELLIGENCE DATA STRUCTURES =============
@@ -1868,17 +1869,29 @@ impl AiIntelligenceService {
         };
 
         GlobalOpportunity {
-            opportunity: arb_opp,
+            id: Uuid::new_v4().to_string(),            // ADDED
+            opportunity_type: "arbitrage".to_string(), // ADDED
+            opportunity: arb_opp.clone(),              // Cloned arb_opp for the main field
+            arbitrage_opportunity: Some(arb_opp),      // ADDED
+            technical_opportunity: None,               // ADDED
+            source: OpportunitySource::SystemGenerated,
+            created_at: trading_opp.created_at, // ADDED
             detection_timestamp: trading_opp.created_at,
-            expiry_timestamp: trading_opp
-                .expires_at
-                .unwrap_or(trading_opp.created_at + 3600000), // 1 hour default
+            expires_at: trading_opp.expires_at, // ADDED
+            expiry_timestamp: Some(
+                trading_opp
+                    .expires_at
+                    .unwrap_or(trading_opp.created_at + 3600000), // 1 hour default
+            ),
+            priority: 5, // ADDED - default priority
             priority_score: trading_opp.confidence_score,
+            ai_enhanced: false,        // ADDED
+            ai_confidence_score: None, // ADDED
+            ai_insights: None,         // ADDED
             distributed_to: Vec::new(),
             max_participants: Some(1),
             current_participants: 0,
             distribution_strategy: DistributionStrategy::FirstComeFirstServe,
-            source: OpportunitySource::SystemGenerated,
         }
     }
 

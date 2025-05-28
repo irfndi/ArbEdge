@@ -1,7 +1,7 @@
 use crate::services::core::infrastructure::cloudflare_pipelines::CloudflarePipelinesService;
 use crate::types::{ExchangeIdEnum, FundingRateInfo};
 use crate::utils::logger::Logger;
-use crate::{ArbitrageError, ArbitrageResult};
+use crate::{utils::ArbitrageError, utils::ArbitrageResult};
 // Remove circular dependency - define MarketDataSnapshot locally
 // use crate::services::core::market_data::market_data_ingestion::{MarketDataSnapshot, MarketDataIngestionService};
 use chrono::Utc;
@@ -215,9 +215,13 @@ impl HybridDataAccessService {
 
     /// Constructor for compatibility with services expecting new(env)
     pub fn new_from_env(env: &worker::Env) -> ArbitrageResult<Self> {
-        let kv_store = env.kv("MARKET_DATA_KV").map_err(|e| {
-            ArbitrageError::configuration_error(format!("Failed to get KV store: {}", e))
-        })?;
+        // Try MARKET_DATA_KV first, then fallback to ArbEdgeKV
+        let kv_store = env
+            .kv("MARKET_DATA_KV")
+            .or_else(|_| env.kv("ArbEdgeKV"))
+            .map_err(|e| {
+                ArbitrageError::configuration_error(format!("Failed to get KV store: {}", e))
+            })?;
         let logger = Logger::new(crate::utils::logger::LogLevel::Info);
         let config = HybridDataAccessConfig::default();
 
@@ -247,9 +251,13 @@ impl HybridDataAccessService {
         config: HybridDataAccessConfig,
     ) -> ArbitrageResult<Self> {
         config.validate()?;
-        let kv_store = env.kv("MARKET_DATA_KV").map_err(|e| {
-            ArbitrageError::configuration_error(format!("Failed to get KV store: {}", e))
-        })?;
+        // Try MARKET_DATA_KV first, then fallback to ArbEdgeKV
+        let kv_store = env
+            .kv("MARKET_DATA_KV")
+            .or_else(|_| env.kv("ArbEdgeKV"))
+            .map_err(|e| {
+                ArbitrageError::configuration_error(format!("Failed to get KV store: {}", e))
+            })?;
         let logger = Logger::new(crate::utils::logger::LogLevel::Info);
 
         Ok(Self {
@@ -479,28 +487,36 @@ impl HybridDataAccessService {
 
         // 1. Try pipelines (primary)
         if let Some(ref pipelines) = self.pipelines_service {
-            match self
-                .get_pipeline_market_data(pipelines, exchange, symbol)
-                .await
-            {
-                Ok(mut data) => {
-                    data.source = DataAccessSource::Pipeline;
-                    self.metrics.pipeline_hits += 1;
-                    self.update_metrics(start_time, true);
+            // Check if Pipelines service is available before using it
+            if pipelines.is_service_available().await {
+                match self
+                    .get_pipeline_market_data(pipelines, exchange, symbol)
+                    .await
+                {
+                    Ok(mut data) => {
+                        data.source = DataAccessSource::Pipeline;
+                        self.metrics.pipeline_hits += 1;
+                        self.update_metrics(start_time, true);
 
-                    self.logger.info(&format!(
-                        "Retrieved market data from pipeline: {}:{}",
-                        exchange, symbol
-                    ));
+                        self.logger.info(&format!(
+                            "Retrieved market data from pipeline: {}:{}",
+                            exchange, symbol
+                        ));
 
-                    return Ok(data);
+                        return Ok(data);
+                    }
+                    Err(e) => {
+                        self.logger.warn(&format!(
+                            "Pipeline data access failed for {}:{}: {}",
+                            exchange, symbol, e
+                        ));
+                    }
                 }
-                Err(e) => {
-                    self.logger.warn(&format!(
-                        "Pipeline data access failed for {}:{}: {}",
-                        exchange, symbol, e
-                    ));
-                }
+            } else {
+                self.logger.debug(&format!(
+                    "Pipelines service unavailable, skipping pipeline data access for {}:{}",
+                    exchange, symbol
+                ));
             }
         }
 
@@ -577,27 +593,35 @@ impl HybridDataAccessService {
 
         // 1. Try pipelines (primary)
         if let Some(ref pipelines) = self.pipelines_service {
-            match self
-                .get_pipeline_funding_rate(pipelines, exchange, symbol)
-                .await
-            {
-                Ok(funding_rate) => {
-                    self.metrics.pipeline_hits += 1;
-                    self.update_metrics(start_time, true);
+            // Check if Pipelines service is available before using it
+            if pipelines.is_service_available().await {
+                match self
+                    .get_pipeline_funding_rate(pipelines, exchange, symbol)
+                    .await
+                {
+                    Ok(funding_rate) => {
+                        self.metrics.pipeline_hits += 1;
+                        self.update_metrics(start_time, true);
 
-                    self.logger.info(&format!(
-                        "Retrieved funding rate from pipeline: {}:{}",
-                        exchange, symbol
-                    ));
+                        self.logger.info(&format!(
+                            "Retrieved funding rate from pipeline: {}:{}",
+                            exchange, symbol
+                        ));
 
-                    return Ok(funding_rate);
+                        return Ok(funding_rate);
+                    }
+                    Err(e) => {
+                        self.logger.warn(&format!(
+                            "Pipeline funding rate access failed for {}:{}: {}",
+                            exchange, symbol, e
+                        ));
+                    }
                 }
-                Err(e) => {
-                    self.logger.warn(&format!(
-                        "Pipeline funding rate access failed for {}:{}: {}",
-                        exchange, symbol, e
-                    ));
-                }
+            } else {
+                self.logger.debug(&format!(
+                    "Pipelines service unavailable, skipping pipeline funding rate access for {}:{}",
+                    exchange, symbol
+                ));
             }
         }
 

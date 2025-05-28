@@ -771,15 +771,25 @@ mod tests {
         );
 
         let global_opportunity = GlobalOpportunity {
-            opportunity: arbitrage_opp.unwrap_or_else(|_| ArbitrageOpportunity::default()),
+            id: uuid::Uuid::new_v4().to_string(),
+            opportunity_type: "arbitrage".to_string(),
+            opportunity: arbitrage_opp.clone().unwrap_or_else(|_| ArbitrageOpportunity::default()),
+            arbitrage_opportunity: Some(arbitrage_opp.unwrap_or_else(|_| ArbitrageOpportunity::default())),
+            technical_opportunity: None,
+            source: OpportunitySource::SystemGenerated,
+            created_at: chrono::Utc::now().timestamp() as u64,
             detection_timestamp: chrono::Utc::now().timestamp() as u64,
-            expiry_timestamp: chrono::Utc::now().timestamp() as u64 + 3600,
+            expires_at: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+            expiry_timestamp: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+            priority: 8,
             priority_score: 8.5,
+            ai_enhanced: false,
+            ai_confidence_score: None,
+            ai_insights: None,
             distributed_to: vec!["user1".to_string()],
             max_participants: Some(10),
             current_participants: 1,
             distribution_strategy: DistributionStrategy::FirstComeFirstServe,
-            source: OpportunitySource::SystemGenerated,
         };
 
         MarketDataSnapshot {
@@ -1159,15 +1169,25 @@ mod tests {
             );
 
             GlobalOpportunity {
+                id: uuid::Uuid::new_v4().to_string(),
+                opportunity_type: "arbitrage".to_string(),
                 opportunity: arbitrage_opp.unwrap_or_else(|_| ArbitrageOpportunity::default()),
+                arbitrage_opportunity: Some(arbitrage_opp.unwrap_or_else(|_| ArbitrageOpportunity::default())),
+                technical_opportunity: None,
+                source: OpportunitySource::SystemGenerated,
+                created_at: chrono::Utc::now().timestamp() as u64,
                 detection_timestamp: chrono::Utc::now().timestamp() as u64,
-                expiry_timestamp: chrono::Utc::now().timestamp() as u64 + 3600,
+                expires_at: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+                expiry_timestamp: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+                priority: 8,
                 priority_score: 8.5,
-                distributed_to: vec!["user1".to_string(), "user2".to_string()],
+                ai_enhanced: false,
+                ai_confidence_score: None,
+                ai_insights: None,
+                distributed_to: vec!["user1".to_string()],
                 max_participants: Some(10),
                 current_participants: 3,
                 distribution_strategy: DistributionStrategy::FirstComeFirstServe,
-                source: OpportunitySource::SystemGenerated,
             }
         }
 

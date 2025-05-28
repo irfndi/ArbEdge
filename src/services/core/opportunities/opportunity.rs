@@ -164,7 +164,9 @@ impl OpportunityService {
                 // Basic users get more opportunities (first 5)
                 opportunities.truncate(5);
             }
-            crate::types::SubscriptionTier::Premium
+            crate::types::SubscriptionTier::Pro
+            | crate::types::SubscriptionTier::Admin
+            | crate::types::SubscriptionTier::Premium
             | crate::types::SubscriptionTier::Enterprise
             | crate::types::SubscriptionTier::SuperAdmin => {
                 // Premium+ users get all opportunities (no filtering)

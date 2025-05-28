@@ -375,19 +375,14 @@ impl UserProfileService {
     }
 
     pub async fn get_invitation_code(&self, code: &str) -> ArbitrageResult<Option<InvitationCode>> {
-        // Check cache first
-        if let Some(invitation) = self.get_invitation_code_from_cache(code).await? {
-            return Ok(Some(invitation));
-        }
+        self.d1_service.get_invitation_code(code).await
+    }
 
-        // Get from D1 if not cached
-        if let Some(invitation) = self.d1_service.get_invitation_code(code).await? {
-            // Cache for future lookups
-            self.store_invitation_code(&invitation).await?;
-            Ok(Some(invitation))
-        } else {
-            Ok(None)
-        }
+    /// Get all user profiles (admin function)
+    pub async fn get_all_user_profiles(&self) -> ArbitrageResult<Vec<UserProfile>> {
+        // Use D1Service to get all user profiles
+        let profiles = self.d1_service.list_user_profiles(None, None).await?;
+        Ok(profiles)
     }
 
     // Helper methods for caching
@@ -444,6 +439,7 @@ impl UserProfileService {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn get_invitation_code_from_cache(
         &self,
         code: &str,

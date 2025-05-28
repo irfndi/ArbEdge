@@ -1,17 +1,22 @@
 // src/services/exchange.rs
 
 use chrono::Utc;
+use hmac::{Hmac, Mac};
 use reqwest::{Client, Method};
 use serde_json::{json, Value};
+use sha2::Sha256;
+use std::collections::HashMap;
+use worker::console_log;
 
 use crate::services::core::user::user_profile::UserProfileService;
-use crate::types::*;
+use crate::types::{
+    AssetBalance, CommandPermission, ExchangeBalance, ExchangeCredentials, ExchangeIdEnum, Limits,
+    Market, MinMax, OrderBook, Precision, Ticker,
+};
 use crate::utils::{ArbitrageError, ArbitrageResult};
 
 // Exchange authentication helper
 use hex;
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 
 pub trait ExchangeInterface {
     #[allow(async_fn_in_trait)]
@@ -197,12 +202,18 @@ pub struct ExchangeService {
 
 impl ExchangeService {
     #[allow(clippy::result_large_err)]
-    pub fn new(env: &Env) -> ArbitrageResult<Self> {
-        let kv = env.get_kv_store("ARBITRAGE_KV").ok_or_else(|| {
-            ArbitrageError::internal_error(
-                "Failed to get KV store: ARBITRAGE_KV binding not found".to_string(),
-            )
-        })?;
+    pub fn new(env: &crate::types::Env) -> ArbitrageResult<Self> {
+        // Try ARBITRAGE_KV first, then fallback to ArbEdgeKV
+        let kv = env
+            .worker_env
+            .kv("ARBITRAGE_KV")
+            .or_else(|_| env.worker_env.kv("ArbEdgeKV"))
+            .map_err(|e| {
+                ArbitrageError::internal_error(format!(
+                    "Failed to get KV store: Neither ARBITRAGE_KV nor ArbEdgeKV binding found: {}",
+                    e
+                ))
+            })?;
 
         let client = Client::new();
 
@@ -314,35 +325,45 @@ impl ExchangeService {
         &self,
         symbol: &str,
     ) -> ArbitrageResult<crate::types::FundingRateInfo> {
-        // Binance Premium Index API for funding rates
-        let endpoint = "/fapi/v1/premiumIndex";
+        // Binance Funding Rate History API - get the latest funding rate
+        let endpoint = "/fapi/v1/fundingRate";
         let params = json!({
-            "symbol": symbol
+            "symbol": symbol,
+            "limit": 1
         });
 
         let response = self
-            .binance_request(endpoint, Method::GET, Some(params), None)
+            .binance_futures_request(endpoint, Method::GET, Some(params), None)
             .await?;
 
-        let funding_rate = response["lastFundingRate"]
-            .as_str()
-            .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(0.0);
-
-        let next_funding_time = response["nextFundingTime"]
-            .as_u64()
-            .and_then(|ts| chrono::DateTime::from_timestamp((ts / 1000) as i64, 0));
-
-        Ok(crate::types::FundingRateInfo {
-            symbol: symbol.to_string(),
-            funding_rate,
-            timestamp: Some(chrono::Utc::now()),
-            datetime: Some(chrono::Utc::now().to_rfc3339()),
-            next_funding_time,
-            estimated_rate: response["markPrice"]
+        // Response is an array, get the first (latest) entry
+        if let Some(rate_data) = response.as_array().and_then(|arr| arr.first()) {
+            let funding_rate = rate_data["fundingRate"]
                 .as_str()
-                .and_then(|s| s.parse::<f64>().ok()),
-        })
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+
+            let funding_time = rate_data["fundingTime"]
+                .as_u64()
+                .and_then(|ts| chrono::DateTime::from_timestamp((ts / 1000) as i64, 0));
+
+            // Note: Binance funding rate API doesn't provide markPrice field
+            // Only returns symbol, fundingRate, and fundingTime
+
+            Ok(crate::types::FundingRateInfo {
+                symbol: symbol.to_string(),
+                funding_rate,
+                timestamp: Some(chrono::Utc::now()),
+                datetime: Some(chrono::Utc::now().to_rfc3339()),
+                next_funding_time: funding_time,
+                estimated_rate: None, // Not available in Binance funding rate API
+            })
+        } else {
+            Err(ArbitrageError::not_found(format!(
+                "No funding rate data found for Binance:{}",
+                symbol
+            )))
+        }
     }
 
     /// Get Bybit funding rate using real API
@@ -445,6 +466,138 @@ impl ExchangeService {
         params: Option<Value>,
         auth: Option<&ExchangeCredentials>,
     ) -> ArbitrageResult<Value> {
+        self.binance_request_with_retry(endpoint, method, params, auth, 3)
+            .await
+    }
+
+    async fn binance_futures_request(
+        &self,
+        endpoint: &str,
+        method: Method,
+        params: Option<Value>,
+        auth: Option<&ExchangeCredentials>,
+    ) -> ArbitrageResult<Value> {
+        self.binance_futures_request_with_retry(endpoint, method, params, auth, 3)
+            .await
+    }
+
+    async fn binance_futures_request_with_retry(
+        &self,
+        endpoint: &str,
+        method: Method,
+        params: Option<Value>,
+        auth: Option<&ExchangeCredentials>,
+        max_retries: u32,
+    ) -> ArbitrageResult<Value> {
+        self.retry_with_backoff(
+            || self.binance_futures_request_single(endpoint, method.clone(), params.clone(), auth),
+            max_retries,
+            "Binance Futures API request",
+        )
+        .await
+    }
+
+    async fn binance_futures_request_single(
+        &self,
+        endpoint: &str,
+        method: Method,
+        params: Option<Value>,
+        auth: Option<&ExchangeCredentials>,
+    ) -> ArbitrageResult<Value> {
+        // Use Binance Futures API base URL
+        let base_url = "https://fapi.binance.com";
+        let mut url = format!("{}{}", base_url, endpoint);
+
+        let mut query_params = Vec::new();
+
+        // Add query parameters
+        if let Some(params) = &params {
+            if let Some(obj) = params.as_object() {
+                for (key, value) in obj {
+                    let value_str = match value {
+                        Value::String(s) => s.clone(),
+                        Value::Number(n) => n.to_string(),
+                        Value::Bool(b) => b.to_string(),
+                        _ => value.to_string().trim_matches('"').to_string(),
+                    };
+                    query_params.push(format!("{}={}", key, value_str));
+                }
+            }
+        }
+
+        // Add authentication if provided
+        if let Some(credentials) = auth {
+            let timestamp = chrono::Utc::now().timestamp_millis();
+            query_params.push(format!("timestamp={}", timestamp));
+
+            // Create query string for signature
+            let query_string = query_params.join("&");
+
+            // Create signature
+            let signature = self.create_hmac_signature(&query_string, &credentials.secret)?;
+            query_params.push(format!("signature={}", signature));
+        }
+
+        // Add query parameters to URL
+        if !query_params.is_empty() {
+            url.push('?');
+            url.push_str(&query_params.join("&"));
+        }
+
+        // Build request
+        let mut request_builder = self.client.request(method, &url);
+
+        // Add headers
+        if let Some(credentials) = auth {
+            request_builder = request_builder.header("X-MBX-APIKEY", &credentials.api_key);
+        }
+        request_builder = request_builder.header("Content-Type", "application/json");
+
+        // Send request
+        let response = request_builder.send().await.map_err(|e| {
+            ArbitrageError::network_error(format!("Binance Futures API request failed: {}", e))
+        })?;
+
+        let status = response.status();
+        let response_text = response.text().await.map_err(|e| {
+            ArbitrageError::network_error(format!("Failed to read Binance Futures response: {}", e))
+        })?;
+
+        if !status.is_success() {
+            return Err(ArbitrageError::exchange_error(
+                "binance_futures",
+                format!("Binance Futures API error ({}): {}", status, response_text),
+            ));
+        }
+
+        // Parse JSON response
+        serde_json::from_str(&response_text).map_err(|e| {
+            ArbitrageError::parse_error(format!(
+                "Failed to parse Binance Futures response: {} - Response: {}",
+                e, response_text
+            ))
+        })
+    }
+
+    fn extract_retry_after_from_error(&self, error: &ArbitrageError) -> Option<u64> {
+        // Try to extract Retry-After value from error details
+        if let Some(details) = &error.details {
+            if let Some(retry_after) = details.get("retry_after") {
+                if let Some(seconds) = retry_after.as_u64() {
+                    return Some(seconds);
+                }
+            }
+        }
+        None
+    }
+
+    async fn binance_request_single(
+        &self,
+        endpoint: &str,
+        method: Method,
+        params: Option<Value>,
+        auth: Option<&ExchangeCredentials>,
+    ) -> ArbitrageResult<Value> {
         let base_url = "https://api.binance.com";
         let url = format!("{}{}", base_url, endpoint);
 
@@ -506,12 +659,51 @@ impl ExchangeService {
             .await
             .map_err(|e| ArbitrageError::network_error(format!("HTTP request failed: {}", e)))?;
 
+        let status_code = response.status().as_u16();
+        let headers = response.headers().clone();
+
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ArbitrageError::api_error(format!(
-                "Binance API error: {}",
-                error_text
-            )));
+
+            // Extract Retry-After header if present
+            let mut error_details = HashMap::new();
+            if let Some(retry_after) = headers.get("retry-after") {
+                if let Ok(retry_str) = retry_after.to_str() {
+                    if let Ok(retry_seconds) = retry_str.parse::<u64>() {
+                        error_details.insert(
+                            "retry_after".to_string(),
+                            serde_json::Value::Number(serde_json::Number::from(retry_seconds)),
+                        );
+                    }
+                }
+            }
+
+            // Check if response is HTML (indicating rate limiting/IP ban)
+            let is_html_response = error_text.trim_start().starts_with("<");
+
+            let error_message = if is_html_response {
+                match status_code {
+                    429 => "Binance API rate limit exceeded - HTML response received".to_string(),
+                    418 => "Binance API IP ban detected - HTML response received".to_string(),
+                    403 => "Binance API WAF limit exceeded - HTML response received".to_string(),
+                    _ => format!("Binance API returned HTML error (status {})", status_code),
+                }
+            } else {
+                format!("Binance API error: {}", error_text)
+            };
+
+            let mut error = match status_code {
+                429 => ArbitrageError::rate_limit_error(error_message),
+                418 => ArbitrageError::rate_limit_error(format!("IP banned: {}", error_message)),
+                403 => ArbitrageError::rate_limit_error(format!("WAF limit: {}", error_message)),
+                _ => ArbitrageError::api_error(error_message),
+            };
+
+            if !error_details.is_empty() {
+                error = error.with_details(error_details);
+            }
+
+            return Err(error.with_status(status_code));
         }
 
         let json: Value = response
@@ -695,20 +887,147 @@ impl ExchangeService {
     fn create_hmac_signature(&self, message: &str, secret: &str) -> ArbitrageResult<String> {
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
-
         type HmacSha256 = Hmac<Sha256>;
 
         let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-            .map_err(|e| ArbitrageError::validation_error(format!("Invalid secret key: {}", e)))?;
-
+            .map_err(|e| ArbitrageError::authentication_error(format!("Invalid secret: {}", e)))?;
         mac.update(message.as_bytes());
         let result = mac.finalize();
-        let signature = {
-            use base64::{prelude::BASE64_STANDARD, Engine};
-            BASE64_STANDARD.encode(result.into_bytes())
+        Ok(hex::encode(result.into_bytes()))
+    }
+
+    /// Generic retry function with exponential backoff
+    async fn retry_with_backoff<F, Fut, T>(
+        &self,
+        operation: F,
+        max_retries: u32,
+        operation_name: &str,
+    ) -> ArbitrageResult<T>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = ArbitrageResult<T>>,
+    {
+        let mut last_error = None;
+
+        for attempt in 0..=max_retries {
+            match operation().await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    last_error = Some(e.clone());
+
+                    if attempt < max_retries {
+                        let should_retry = self.should_retry_error(&e);
+
+                        if should_retry {
+                            let delay = self.calculate_retry_delay(&e, attempt);
+                            console_log!(
+                                "{} failed (attempt {}), retrying in {}ms: {}",
+                                operation_name,
+                                attempt + 1,
+                                delay,
+                                e.message
+                            );
+
+                            self.async_delay(delay).await;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            ArbitrageError::network_error(format!("All {} retry attempts failed", operation_name))
+        }))
+    }
+
+    /// Determine if an error should trigger a retry
+    fn should_retry_error(&self, error: &ArbitrageError) -> bool {
+        match error.status {
+            Some(429) | Some(418) | Some(403) => true, // Rate limit, IP ban, WAF limit
+            _ => match &error.kind {
+                crate::utils::error::ErrorKind::NetworkError => true,
+                crate::utils::error::ErrorKind::ExchangeError => {
+                    error.message.contains("rate limit")
+                        || error.message.contains("503")
+                        || error.message.contains("502")
+                        || error.message.contains("timeout")
+                }
+                _ => false,
+            },
+        }
+    }
+
+    /// Calculate retry delay based on error type and attempt number
+    fn calculate_retry_delay(&self, error: &ArbitrageError, attempt: u32) -> u64 {
+        use rand::Rng;
+
+        let base_delay = match error.status {
+            Some(429) => {
+                // Rate limit - extract retry-after header if available
+                self.extract_retry_after_from_error(error).unwrap_or(60) * 1000
+            }
+            Some(418) => {
+                // IP ban - longer wait time
+                self.extract_retry_after_from_error(error).unwrap_or(300) * 1000
+            }
+            Some(403) => {
+                // WAF limit - exponential backoff with jitter
+                let base = 30 * (attempt + 1) as u64 * 1000;
+                let jitter = rand::thread_rng().gen_range(0..=base / 4); // 0-25% jitter
+                base + jitter
+            }
+            _ => {
+                // General exponential backoff with overflow protection and jitter
+                // Cap the exponent to prevent overflow (2^10 = 1024, so max ~1 second base)
+                let capped_attempt = std::cmp::min(attempt, 10);
+                let base_delay = 1000 * (2_u64.pow(capped_attempt));
+                let max_delay = 10000; // 10 seconds max
+                let delay_without_jitter = std::cmp::min(base_delay, max_delay);
+
+                // Add jitter (±25% of the delay)
+                let jitter_range = delay_without_jitter / 4;
+                let jitter = rand::thread_rng().gen_range(0..=jitter_range * 2);
+                let jitter_offset = jitter.saturating_sub(jitter_range); // Can be negative
+
+                delay_without_jitter.saturating_add(jitter_offset)
+            }
         };
 
-        Ok(signature)
+        // Ensure minimum delay of 100ms and maximum of 5 minutes
+        base_delay.clamp(100, 300_000)
+    }
+
+    /// Cross-platform async delay
+    async fn async_delay(&self, delay_ms: u64) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Use gloo-timers for non-blocking async delay in WASM
+            use gloo_timers::future::TimeoutFuture;
+            TimeoutFuture::new(delay_ms as u32).await;
+        }
+    }
+
+    async fn binance_request_with_retry(
+        &self,
+        endpoint: &str,
+        method: Method,
+        params: Option<Value>,
+        auth: Option<&ExchangeCredentials>,
+        max_retries: u32,
+    ) -> ArbitrageResult<Value> {
+        self.retry_with_backoff(
+            || self.binance_request_single(endpoint, method.clone(), params.clone(), auth),
+            max_retries,
+            "Binance API request",
+        )
+        .await
     }
 }
 
@@ -933,8 +1252,14 @@ impl ExchangeInterface for ExchangeService {
                     params["symbol"] = json!(s);
                 }
 
+                // Use Binance Futures API for funding rates
                 let response = self
-                    .binance_request("/fapi/v1/premiumIndex", Method::GET, Some(params), None)
+                    .binance_futures_request(
+                        "/fapi/v1/premiumIndex",
+                        Method::GET,
+                        Some(params),
+                        None,
+                    )
                     .await?;
 
                 if response.is_array() {

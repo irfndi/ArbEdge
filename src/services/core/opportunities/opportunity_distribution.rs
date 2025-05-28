@@ -11,7 +11,7 @@ use crate::types::{
     ArbitrageOpportunity, ChatContext, DistributionStrategy, FairnessConfig, GlobalOpportunity,
     OpportunitySource,
 };
-use crate::utils::{ArbitrageError, ArbitrageResult};
+use crate::utils::ArbitrageResult;
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -29,7 +29,7 @@ pub trait NotificationSender: Send + Sync {
     async fn send_message(&self, chat_id: &str, message: &str) -> ArbitrageResult<()>;
 }
 
-// WASM version without Send + Sync bounds
+// WASM version without Send + Sync bounds since WASM is single-threaded
 #[async_trait::async_trait(?Send)]
 #[cfg(target_arch = "wasm32")]
 pub trait NotificationSender {
@@ -77,9 +77,9 @@ pub struct OpportunityDistributionService {
     kv_service: KVService,
     session_service: SessionManagementService,
     #[cfg(not(target_arch = "wasm32"))]
-    notification_sender: Option<Box<dyn NotificationSender + Send + Sync>>,
-    #[cfg(target_arch = "wasm32")]
     notification_sender: Option<Box<dyn NotificationSender>>,
+    #[cfg(target_arch = "wasm32")]
+    notification_sender: Option<Box<dyn NotificationSender + Send + Sync>>,
     pipelines_service: Option<CloudflarePipelinesService>,
     vectorize_service: Option<VectorizeService>,
     queues_service: Option<CloudflareQueuesService>,
@@ -110,12 +110,12 @@ impl OpportunityDistributionService {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_notification_sender(&mut self, sender: Box<dyn NotificationSender + Send + Sync>) {
+    pub fn set_notification_sender(&mut self, sender: Box<dyn NotificationSender>) {
         self.notification_sender = Some(sender);
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn set_notification_sender(&mut self, sender: Box<dyn NotificationSender>) {
+    pub fn set_notification_sender(&mut self, sender: Box<dyn NotificationSender + Send + Sync>) {
         self.notification_sender = Some(sender);
     }
 
@@ -137,17 +137,30 @@ impl OpportunityDistributionService {
         &self,
         opportunity: ArbitrageOpportunity,
     ) -> ArbitrageResult<u32> {
+        let start_time = chrono::Utc::now().timestamp_millis() as u64;
+
         // Create global opportunity with metadata
         let global_opportunity = GlobalOpportunity {
+            id: format!("global_opp_{}", opportunity.id),
+            opportunity_type: "arbitrage".to_string(),
             opportunity: opportunity.clone(),
-            detection_timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            expiry_timestamp: chrono::Utc::now().timestamp_millis() as u64 + (10 * 60 * 1000), // 10 minutes
+            arbitrage_opportunity: Some(opportunity.clone()),
+            technical_opportunity: None,
+            source: OpportunitySource::SystemGenerated,
+            created_at: start_time,
+            detection_timestamp: start_time,
+            expires_at: Some(start_time + (10 * 60 * 1000)), // 10 minutes
+            expiry_timestamp: Some(start_time + (10 * 60 * 1000)), // 10 minutes
+            priority: 8,                                     // High priority (1-10 scale)
             priority_score: self.calculate_priority_score(&opportunity).await?,
+            ai_enhanced: false,
+            ai_confidence_score: None,
+            ai_insights: None,
+            // Additional fields for distribution tracking
             distributed_to: Vec::new(),
             max_participants: self.config.max_participants_per_opportunity,
             current_participants: 0,
             distribution_strategy: DistributionStrategy::RoundRobin,
-            source: OpportunitySource::SystemGenerated,
         };
 
         // Get eligible users
@@ -175,6 +188,14 @@ impl OpportunityDistributionService {
 
         // Store distribution analytics
         self.record_distribution_analytics(&global_opportunity, distributed_count)
+            .await?;
+
+        // Update KV cache with distribution statistics
+        self.update_distribution_stats_cache(distributed_count, start_time)
+            .await?;
+
+        // Update active users count in KV cache
+        self.update_active_users_count(selected_users.len() as u32)
             .await?;
 
         Ok(distributed_count)
@@ -228,6 +249,49 @@ impl OpportunityDistributionService {
             .max_opportunities_per_user_per_hour;
 
         match opportunity.distribution_strategy {
+            DistributionStrategy::Immediate => {
+                // Send immediately to all eligible users
+                selected_users.extend_from_slice(
+                    &eligible_users[..std::cmp::min(eligible_users.len(), max_users as usize)],
+                );
+            }
+            DistributionStrategy::Batched => {
+                // Batch selection with size limits
+                selected_users.extend_from_slice(
+                    &eligible_users
+                        [..std::cmp::min(eligible_users.len(), self.config.batch_size as usize)],
+                );
+            }
+            DistributionStrategy::Prioritized => {
+                // Priority-based selection (subscription tier, activity, etc.)
+                let mut user_scores = HashMap::new();
+
+                for user_id in eligible_users {
+                    let score = self.calculate_user_priority_score(user_id).await?;
+                    user_scores.insert(user_id.clone(), score);
+                }
+
+                // Sort by priority score (highest first)
+                let mut sorted_users: Vec<_> = user_scores.into_iter().collect();
+                sorted_users.sort_by(|(_, a), (_, b)| {
+                    b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                for (user_id, _) in sorted_users.into_iter().take(max_users as usize) {
+                    selected_users.push(user_id);
+                }
+            }
+            DistributionStrategy::RateLimited => {
+                // Respect individual user rate limits
+                for user_id in eligible_users {
+                    if self.check_user_rate_limit(user_id).await? {
+                        selected_users.push(user_id.clone());
+                        if selected_users.len() >= max_users as usize {
+                            break;
+                        }
+                    }
+                }
+            }
             DistributionStrategy::FirstComeFirstServe => {
                 // Simple FIFO selection
                 selected_users.extend_from_slice(
@@ -347,6 +411,10 @@ impl OpportunityDistributionService {
 
         // Convert distribution strategy to queue distribution strategy
         let queue_strategy = match opportunity.distribution_strategy {
+            DistributionStrategy::Immediate => QueueDistributionStrategy::Broadcast,
+            DistributionStrategy::Batched => QueueDistributionStrategy::Broadcast,
+            DistributionStrategy::Prioritized => QueueDistributionStrategy::PriorityBased,
+            DistributionStrategy::RateLimited => QueueDistributionStrategy::Broadcast,
             DistributionStrategy::RoundRobin => QueueDistributionStrategy::RoundRobin,
             DistributionStrategy::FirstComeFirstServe => QueueDistributionStrategy::Broadcast,
             DistributionStrategy::PriorityBased => QueueDistributionStrategy::PriorityBased,
@@ -370,6 +438,9 @@ impl OpportunityDistributionService {
                     self.update_user_distribution_tracking(user_id, opportunity)
                         .await?;
                 }
+                // Update active users count in cache
+                self.update_active_users_count(selected_users.len() as u32)
+                    .await?;
                 Ok(selected_users.len() as u32)
             }
             Err(e) => {
@@ -402,6 +473,9 @@ impl OpportunityDistributionService {
                 }
             }
         }
+
+        // Update active users count in cache
+        self.update_active_users_count(distributed_count).await?;
 
         Ok(distributed_count)
     }
@@ -662,7 +736,10 @@ impl OpportunityDistributionService {
 
         self.d1_service.execute(insert_query, &params).await?;
 
-        // Record high-volume analytics via Cloudflare Pipelines for scalable data ingestion
+        // Update distribution statistics in KV cache for fast access
+        self.update_distribution_stats_cache(distributed_count, opportunity.detection_timestamp)
+            .await?;
+
         // Record high-volume analytics via Cloudflare Pipelines for scalable data ingestion
         if let Some(ref pipelines_service) = self.pipelines_service {
             let distribution_latency =
@@ -737,82 +814,320 @@ impl OpportunityDistributionService {
         }
     }
 
-    /// Get distribution statistics
+    /// Get distribution statistics for monitoring
     pub async fn get_distribution_stats(&self) -> ArbitrageResult<DistributionStats> {
-        // Get today's distribution count from database
-        let today_start = chrono::Utc::now()
+        let _today_start = chrono::Utc::now()
             .date_naive()
             .and_hms_opt(0, 0, 0)
             .ok_or_else(|| {
-                ArbitrageError::validation_error("Failed to create start of day timestamp")
+                crate::utils::ArbitrageError::validation_error(
+                    "Invalid time values for today start",
+                )
             })?
             .and_utc()
-            .timestamp_millis();
-        let today_end = chrono::Utc::now()
-            .date_naive()
-            .and_hms_opt(23, 59, 59)
-            .ok_or_else(|| {
-                ArbitrageError::validation_error("Failed to create end of day timestamp")
-            })?
-            .and_utc()
-            .timestamp_millis();
+            .timestamp() as u64;
 
-        let count_query = "
-            SELECT COUNT(*) as count, AVG(distributed_count) as avg_distributed
-            FROM opportunity_distribution_analytics 
-            WHERE distribution_timestamp >= ? AND distribution_timestamp <= ?
-        ";
-
-        let count_params = vec![
-            serde_json::Value::Number(serde_json::Number::from(today_start)),
-            serde_json::Value::Number(serde_json::Number::from(today_end)),
-        ];
-
-        let count_rows = self.d1_service.query(count_query, &count_params).await?;
-        let today_count = if let Some(row) = count_rows.first() {
-            row.get("count")
-                .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(0)
-        } else {
-            0
-        };
+        // Get opportunities distributed today
+        let opportunities_distributed_today = self
+            .kv_service
+            .get("distribution_stats:opportunities_today")
+            .await
+            .unwrap_or_default()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
 
         // Get active users count
-        let active_users = self.session_service.get_active_session_count().await?;
+        let active_users = self
+            .kv_service
+            .get("distribution_stats:active_users")
+            .await
+            .unwrap_or_default()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
 
-        // Calculate average distribution time from recent analytics
-        let avg_time_query = "
-            SELECT AVG(distribution_timestamp - detection_timestamp) as avg_time
-            FROM opportunity_distribution_analytics 
-            WHERE distribution_timestamp >= ?
-            LIMIT 100
-        ";
+        // Calculate average distribution time
+        let average_distribution_time_ms = self
+            .kv_service
+            .get("distribution_stats:avg_time_ms")
+            .await
+            .unwrap_or_default()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
 
-        let avg_time_params = vec![serde_json::Value::Number(serde_json::Number::from(
-            today_start,
-        ))];
-
-        let avg_time_rows = self
-            .d1_service
-            .query(avg_time_query, &avg_time_params)
-            .await?;
-        let average_distribution_time_ms = if let Some(row) = avg_time_rows.first() {
-            row.get("avg_time")
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(150)
-        } else {
-            150
-        };
-
-        // Calculate actual success rate from delivery metrics
-        let success_rate = self.calculate_actual_success_rate().await?;
+        // Calculate success rate
+        let success_rate_percentage = self.calculate_actual_success_rate().await?;
 
         Ok(DistributionStats {
-            opportunities_distributed_today: today_count,
+            opportunities_distributed_today,
             active_users,
             average_distribution_time_ms,
-            success_rate_percentage: success_rate,
+            success_rate_percentage,
         })
+    }
+
+    /// Helper function to parse database row into ArbitrageOpportunity
+    fn parse_opportunity_row(
+        row: std::collections::HashMap<String, String>,
+    ) -> Option<ArbitrageOpportunity> {
+        // Convert database row to ArbitrageOpportunity - row is HashMap<String, String>
+        let opportunity_id = row.get("opportunity_id")?.clone();
+        let pair = row.get("pair")?.clone();
+
+        // Parse exchange enums from strings
+        let long_exchange = row
+            .get("long_exchange")
+            .and_then(|s| s.parse::<crate::types::ExchangeIdEnum>().ok())?;
+        let short_exchange = row
+            .get("short_exchange")
+            .and_then(|s| s.parse::<crate::types::ExchangeIdEnum>().ok())?;
+
+        // Parse numeric values from strings
+        let long_rate = row.get("long_rate").and_then(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                s.parse::<f64>().ok()
+            }
+        });
+        let short_rate = row.get("short_rate").and_then(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                s.parse::<f64>().ok()
+            }
+        });
+        let rate_difference = row.get("rate_difference")?.parse::<f64>().ok()?;
+        let net_rate_difference = row.get("net_rate_difference").and_then(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                s.parse::<f64>().ok()
+            }
+        });
+        let potential_profit_value = row.get("potential_profit_value").and_then(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                s.parse::<f64>().ok()
+            }
+        });
+
+        // Parse opportunity type from string
+        let opportunity_type = row
+            .get("opportunity_type")
+            .map(|s| match s.as_str() {
+                "funding_rate" => crate::types::ArbitrageType::FundingRate,
+                "spot_futures" => crate::types::ArbitrageType::SpotFutures,
+                "cross_exchange" => crate::types::ArbitrageType::CrossExchange,
+                _ => crate::types::ArbitrageType::CrossExchange,
+            })
+            .unwrap_or(crate::types::ArbitrageType::CrossExchange);
+
+        let details =
+            row.get("details")
+                .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
+        let timestamp = row
+            .get("timestamp")
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or_else(|| chrono::Utc::now().timestamp() as u64);
+
+        Some(ArbitrageOpportunity {
+            id: opportunity_id,
+            pair,
+            long_exchange,
+            short_exchange,
+            long_rate,
+            short_rate,
+            rate_difference,
+            net_rate_difference,
+            potential_profit_value,
+            timestamp,
+            r#type: opportunity_type,
+            details,
+            min_exchanges_required: 2,
+        })
+    }
+
+    /// Generic helper function to get opportunities with caching
+    async fn get_opportunities_with_cache(
+        &self,
+        cache_key: &str,
+        query: &str,
+        params: &[serde_json::Value],
+        cache_ttl: Option<u64>,
+    ) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
+        // Try to get from KV cache first
+        if let Ok(Some(cached_data)) = self.kv_service.get(cache_key).await {
+            if let Ok(opportunities) =
+                serde_json::from_str::<Vec<ArbitrageOpportunity>>(&cached_data)
+            {
+                return Ok(opportunities);
+            }
+        }
+
+        // Fallback: Get from D1 database
+        let rows = self
+            .d1_service
+            .query(query, params)
+            .await
+            .unwrap_or_default();
+
+        let opportunities: Vec<ArbitrageOpportunity> = rows
+            .into_iter()
+            .filter_map(Self::parse_opportunity_row)
+            .collect();
+
+        // Cache the results if not empty
+        if !opportunities.is_empty() {
+            if let Ok(cached_json) = serde_json::to_string(&opportunities) {
+                let _ = self
+                    .kv_service
+                    .put(cache_key, &cached_json, cache_ttl)
+                    .await;
+            }
+        }
+
+        Ok(opportunities)
+    }
+
+    /// Get opportunities for a specific user
+    pub async fn get_user_opportunities(
+        &self,
+        user_id: &str,
+    ) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
+        let cache_key = format!("user_opportunities:{}", user_id);
+        let query = r#"
+            SELECT 
+                opportunity_id,
+                pair,
+                long_exchange,
+                short_exchange,
+                long_rate,
+                short_rate,
+                rate_difference,
+                net_rate_difference,
+                potential_profit_value,
+                opportunity_type,
+                details,
+                timestamp
+            FROM user_opportunities 
+            WHERE user_id = ? 
+            AND timestamp > ? 
+            ORDER BY timestamp DESC 
+            LIMIT 50
+        "#;
+
+        let one_hour_ago = chrono::Utc::now().timestamp() as u64 - 3600;
+        let params = vec![
+            serde_json::Value::String(user_id.to_string()),
+            serde_json::Value::Number(serde_json::Number::from(one_hour_ago)),
+        ];
+
+        self.get_opportunities_with_cache(&cache_key, query, &params, Some(300))
+            .await
+    }
+
+    /// Get all opportunities for admin access
+    pub async fn get_all_opportunities(&self) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
+        let cache_key = "all_opportunities";
+        let query = r#"
+            SELECT 
+                opportunity_id,
+                pair,
+                long_exchange,
+                short_exchange,
+                long_rate,
+                short_rate,
+                rate_difference,
+                net_rate_difference,
+                potential_profit_value,
+                opportunity_type,
+                details,
+                timestamp
+            FROM opportunities 
+            WHERE timestamp > ? 
+            ORDER BY timestamp DESC 
+            LIMIT 100
+        "#;
+
+        let one_hour_ago = chrono::Utc::now().timestamp() as u64 - 3600;
+        let params = vec![serde_json::Value::Number(serde_json::Number::from(
+            one_hour_ago,
+        ))];
+
+        self.get_opportunities_with_cache(cache_key, query, &params, Some(120))
+            .await
+    }
+
+    /// Update distribution statistics in KV cache for fast access
+    async fn update_distribution_stats_cache(
+        &self,
+        distributed_count: u32,
+        detection_timestamp: u64,
+    ) -> ArbitrageResult<()> {
+        // Update opportunities distributed today
+        let today_key = "distribution_stats:opportunities_today";
+        let today_count = self
+            .kv_service
+            .get(today_key)
+            .await
+            .unwrap_or_default()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        self.kv_service
+            .put(
+                today_key,
+                &(today_count + distributed_count).to_string(),
+                Some(3600),
+            )
+            .await?;
+
+        // Update active users count
+        let active_users_key = "distribution_stats:active_users";
+        let active_users = self
+            .kv_service
+            .get(active_users_key)
+            .await
+            .unwrap_or_default()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        self.kv_service
+            .put(active_users_key, &active_users.to_string(), Some(3600))
+            .await?;
+
+        // Update average distribution time
+        let avg_time_key = "distribution_stats:avg_time_ms";
+        let current_distribution_time =
+            chrono::Utc::now().timestamp_millis() as u64 - detection_timestamp;
+        let existing_avg_time = self
+            .kv_service
+            .get(avg_time_key)
+            .await
+            .unwrap_or_default()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        // Simple moving average calculation
+        let new_avg_time = if existing_avg_time == 0 {
+            current_distribution_time
+        } else {
+            (existing_avg_time + current_distribution_time) / 2
+        };
+
+        self.kv_service
+            .put(avg_time_key, &new_avg_time.to_string(), Some(3600))
+            .await?;
+
+        Ok(())
+    }
+
+    /// Update active users count in KV cache
+    async fn update_active_users_count(&self, user_count: u32) -> ArbitrageResult<()> {
+        let active_users_key = "distribution_stats:active_users";
+        self.kv_service
+            .put(active_users_key, &user_count.to_string(), Some(24 * 3600)) // 24 hour TTL
+            .await?;
+        Ok(())
     }
 }
 
@@ -859,15 +1174,25 @@ mod tests {
 
         // Test opportunity message formatting
         let global_opp = GlobalOpportunity {
+            id: "test_global_opp_001".to_string(),
+            opportunity_type: "arbitrage".to_string(),
             opportunity: opportunity.clone(),
+            arbitrage_opportunity: Some(opportunity.clone()),
+            technical_opportunity: None,
+            source: OpportunitySource::SystemGenerated,
+            created_at: chrono::Utc::now().timestamp_millis() as u64,
             detection_timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            expiry_timestamp: chrono::Utc::now().timestamp_millis() as u64 + (10 * 60 * 1000),
+            expires_at: Some(chrono::Utc::now().timestamp_millis() as u64 + (10 * 60 * 1000)),
+            expiry_timestamp: Some(chrono::Utc::now().timestamp_millis() as u64 + (10 * 60 * 1000)),
+            priority: 8,
             priority_score: 75.0,
+            ai_enhanced: false,
+            ai_confidence_score: None,
+            ai_insights: None,
             distributed_to: Vec::new(),
             max_participants: Some(100),
             current_participants: 0,
             distribution_strategy: DistributionStrategy::RoundRobin,
-            source: OpportunitySource::SystemGenerated,
         };
 
         // Test message formatting

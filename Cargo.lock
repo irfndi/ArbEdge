@@ -99,6 +99,7 @@ dependencies = [
  "hmac",
  "js-sys",
  "log",
+ "once_cell",
  "rand",
  "regex",
  "reqwest",

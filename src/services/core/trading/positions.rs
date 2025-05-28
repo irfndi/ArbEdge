@@ -763,12 +763,17 @@ impl<K: KvStoreInterface> PositionsService<K> {
         };
 
         let risk_assessment = RiskAssessment {
-            risk_level,
-            volatility_score: position.volatility_score.unwrap_or(0.0),
-            correlation_risk: 0.0, // Would be calculated based on related positions
-            liquidity_risk: 0.0,   // Would be calculated based on market data
-            concentration_risk: 0.0, // Would be calculated based on portfolio
             overall_risk_score: 100.0 - score,
+            market_risk: 0.0,
+            liquidity_risk: 0.0,
+            volatility_risk: position.volatility_score.unwrap_or(0.0),
+            correlation_risk: 0.0,
+            recommendations: vec!["Position analysis completed".to_string()],
+            max_position_size: position.calculated_size_usd.unwrap_or(0.0),
+            stop_loss_recommendation: suggested_stop_loss,
+            take_profit_recommendation: suggested_take_profit,
+            risk_level,
+            concentration_risk: 0.0,
         };
 
         let confidence_level = if score >= 70.0 || score <= 30.0 {
@@ -780,12 +785,15 @@ impl<K: KvStoreInterface> PositionsService<K> {
         let result = PositionOptimizationResult {
             position_id: position_id.to_string(),
             current_score: score,
-            recommended_action,
+            optimized_score: score + 10.0, // Placeholder improvement
+            recommended_actions: vec![recommended_action.clone()],
+            risk_assessment,
+            expected_improvement: 10.0, // Placeholder improvement percentage
             confidence_level,
+            recommended_action,
             reasoning,
             suggested_stop_loss,
             suggested_take_profit,
-            risk_assessment,
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
         };
 
@@ -1430,14 +1438,20 @@ mod tests {
 
         // Create risk management config
         let config = RiskManagementConfig {
-            max_position_size_usd: 5000.0,
+            max_portfolio_risk_percentage: 5.0,
+            max_single_position_risk_percentage: 2.0,
+            enable_stop_loss: true,
+            enable_take_profit: true,
+            enable_trailing_stop: false,
+            correlation_limit: 0.7,
+            volatility_threshold: 0.05,
+            max_position_size_usd: 10000.0,
+            min_risk_reward_ratio: 1.5,
+            default_stop_loss_percentage: 2.0,
+            default_take_profit_percentage: 4.0,
             max_total_exposure_usd: 50000.0,
-            max_positions_per_exchange: 10,
-            max_positions_per_pair: 5,
-            default_stop_loss_percentage: 0.02,
-            default_take_profit_percentage: 0.04,
-            min_risk_reward_ratio: 2.0,
-            enable_trailing_stops: true,
+            max_positions_per_exchange: 5,
+            max_positions_per_pair: 2,
         };
 
         // Analyze position
@@ -1490,14 +1504,20 @@ mod tests {
         let service = TestPositionsService::new(kv_store);
 
         let config = RiskManagementConfig {
-            max_position_size_usd: 5000.0,
+            max_portfolio_risk_percentage: 5.0,
+            max_single_position_risk_percentage: 2.0,
+            enable_stop_loss: true,
+            enable_take_profit: true,
+            enable_trailing_stop: false,
+            correlation_limit: 0.7,
+            volatility_threshold: 0.05,
+            max_position_size_usd: 10000.0,
+            min_risk_reward_ratio: 1.5,
+            default_stop_loss_percentage: 2.0,
+            default_take_profit_percentage: 4.0,
             max_total_exposure_usd: 50000.0,
-            max_positions_per_exchange: 10,
-            max_positions_per_pair: 5,
-            default_stop_loss_percentage: 0.02,
-            default_take_profit_percentage: 0.04,
-            min_risk_reward_ratio: 2.0,
-            enable_trailing_stops: true,
+            max_positions_per_exchange: 5,
+            max_positions_per_pair: 2,
         };
 
         // Test valid position
@@ -1583,6 +1603,25 @@ mod tests {
             assert_eq!(position.optimization_score, Some(0.85));
             assert_eq!(position.recommended_action, Some(PositionAction::Hold));
             assert!(position.last_optimization_check.is_some());
+        }
+    }
+
+    fn create_test_risk_config() -> RiskManagementConfig {
+        RiskManagementConfig {
+            max_portfolio_risk_percentage: 5.0,
+            max_single_position_risk_percentage: 2.0,
+            enable_stop_loss: true,
+            enable_take_profit: true,
+            enable_trailing_stop: false,
+            correlation_limit: 0.7,
+            volatility_threshold: 0.05,
+            max_position_size_usd: 10000.0,
+            min_risk_reward_ratio: 1.5,
+            default_stop_loss_percentage: 2.0,
+            default_take_profit_percentage: 4.0,
+            max_total_exposure_usd: 50000.0,
+            max_positions_per_exchange: 5,
+            max_positions_per_pair: 2,
         }
     }
 }

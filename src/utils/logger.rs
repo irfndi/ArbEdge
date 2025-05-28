@@ -5,7 +5,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(
+    target_arch = "wasm32",
+    any(debug_assertions, feature = "enable-logging")
+))]
 use worker::console_log;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -421,6 +424,41 @@ macro_rules! log_debug {
     ($msg:expr, $meta:expr) => {
         $crate::utils::logger::logger().debug_with_meta($msg, Some(&$meta))
     };
+}
+
+/// Initialize panic hook for better error reporting in WASM
+pub fn set_panic_hook() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        std::panic::set_hook(Box::new(|info| {
+            let mut msg = String::new();
+
+            if let Some(s) = info.payload().downcast_ref::<&str>() {
+                msg.push_str(&format!("panic occurred: {}", s));
+            } else if let Some(s) = info.payload().downcast_ref::<String>() {
+                msg.push_str(&format!("panic occurred: {}", s));
+            } else {
+                msg.push_str("panic occurred");
+            }
+
+            if let Some(location) = info.location() {
+                msg.push_str(&format!(
+                    " at {}:{}:{}",
+                    location.file(),
+                    location.line(),
+                    location.column()
+                ));
+            }
+
+            console_log!("🚨 PANIC: {}", msg);
+        }));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // For non-WASM targets, we can use the default panic hook
+        // or implement a custom one if needed
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 use serde_json::Value;
+use uuid::Uuid;
 
 /// Safely parses a value to a floating-point number.
 /// If parsing fails or results in NaN, returns a default value.
@@ -135,6 +136,52 @@ pub fn moving_average(values: &[f64], window_size: usize) -> Vec<f64> {
         result.push(avg);
     }
     result
+}
+
+/// Generate a new UUID string
+pub fn generate_uuid() -> String {
+    Uuid::new_v4().to_string()
+}
+
+/// Generate a new API key (32 character random string)
+pub fn generate_api_key() -> String {
+    use rand::Rng;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+                            abcdefghijklmnopqrstuvwxyz\
+                            0123456789";
+    let mut rng = rand::thread_rng();
+
+    (0..32)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
+/// Generate a new secret key (64 character random string)
+pub fn generate_secret_key() -> String {
+    use rand::Rng;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+                            abcdefghijklmnopqrstuvwxyz\
+                            0123456789";
+    let mut rng = rand::thread_rng();
+
+    (0..64)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
+/// Validate an API key format (basic validation)
+pub fn validate_api_key(api_key: &str) -> bool {
+    // Basic validation: check if it's alphanumeric and has reasonable length
+    !api_key.is_empty()
+        && api_key.len() >= 16
+        && api_key.len() <= 128
+        && api_key.chars().all(|c| c.is_alphanumeric())
 }
 
 #[cfg(test)]

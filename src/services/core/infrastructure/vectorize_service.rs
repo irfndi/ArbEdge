@@ -142,6 +142,10 @@ pub struct VectorizeMatch {
 pub struct VectorizeService {
     config: VectorizeConfig,
     logger: crate::utils::logger::Logger,
+    #[allow(dead_code)]
+    fallback_enabled: bool,
+    last_health_check: std::sync::Arc<std::sync::Mutex<Option<u64>>>,
+    service_available: std::sync::Arc<std::sync::Mutex<bool>>,
 }
 
 impl VectorizeService {
@@ -158,17 +162,106 @@ impl VectorizeService {
         }
 
         // Validate configuration
-        if config.enabled && (config.account_id.is_empty() || config.api_token.is_empty()) {
-            logger.warn("Vectorize service disabled: missing Cloudflare credentials");
-            config.enabled = false;
-        }
+        let service_available =
+            if config.enabled && (config.account_id.is_empty() || config.api_token.is_empty()) {
+                logger.warn("Vectorize service disabled: missing Cloudflare credentials");
+                config.enabled = false;
+                false
+            } else {
+                config.enabled
+            };
 
         logger.info(&format!(
-            "Vectorize service initialized: enabled={}, index='{}'",
-            config.enabled, config.index_name
+            "Vectorize service initialized: enabled={}, index='{}', fallback_enabled={}",
+            config.enabled, config.index_name, !config.enabled
         ));
 
-        Ok(Self { config, logger })
+        Ok(Self {
+            config,
+            logger,
+            fallback_enabled: true, // Always enable fallback mechanisms
+            last_health_check: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            service_available: std::sync::Arc::new(std::sync::Mutex::new(service_available)),
+        })
+    }
+
+    /// Check if Vectorize service is currently available
+    pub async fn is_service_available(&self) -> bool {
+        // Check if we need to perform a health check
+        let should_check = {
+            let last_check = self.last_health_check.lock().unwrap();
+            let current_status = *self.service_available.lock().unwrap();
+
+            match *last_check {
+                None => true, // Never checked
+                Some(last_time) => {
+                    let now = chrono::Utc::now().timestamp_millis() as u64;
+                    let time_since_check = now - last_time;
+
+                    // Check more frequently if service is down (every 1 minute)
+                    // Check less frequently if service is up (every 5 minutes)
+                    if current_status {
+                        time_since_check > 300_000 // 5 minutes when service is up
+                    } else {
+                        time_since_check > 60_000 // 1 minute when service is down (for faster recovery)
+                    }
+                }
+            }
+        };
+
+        if should_check {
+            self.perform_health_check().await;
+        }
+
+        *self.service_available.lock().unwrap()
+    }
+
+    /// Perform health check and update service availability
+    async fn perform_health_check(&self) {
+        if !self.config.enabled {
+            return;
+        }
+
+        let was_available = *self.service_available.lock().unwrap();
+
+        let available = match self.health_check().await {
+            Ok(true) => {
+                if !was_available {
+                    self.logger
+                        .info("Vectorize service has recovered and is now available");
+                } else {
+                    self.logger.debug("Vectorize service health check passed");
+                }
+                true
+            }
+            Ok(false) => {
+                if was_available {
+                    self.logger.warn(
+                        "Vectorize service has become unavailable - switching to local fallback",
+                    );
+                } else {
+                    self.logger.debug("Vectorize service still unavailable");
+                }
+                false
+            }
+            Err(e) => {
+                if was_available {
+                    self.logger.warn(&format!(
+                        "Vectorize service health check error: {} - switching to local fallback",
+                        e
+                    ));
+                } else {
+                    self.logger
+                        .debug(&format!("Vectorize service still down: {}", e));
+                }
+                false
+            }
+        };
+
+        // Update availability status and timestamp
+        *self.service_available.lock().unwrap() = available;
+        *self.last_health_check.lock().unwrap() =
+            Some(chrono::Utc::now().timestamp_millis() as u64);
     }
 
     /// Store opportunity embedding in Vectorize
@@ -367,42 +460,33 @@ impl VectorizeService {
         opportunities: &[ArbitrageOpportunity],
     ) -> ArbitrageResult<Vec<RankedOpportunity>> {
         if !self.config.enabled || opportunities.is_empty() {
-            // Return default ranking when vectorize is disabled
-            return Ok(opportunities
-                .iter()
-                .map(|opp| RankedOpportunity {
-                    opportunity: opp.clone(),
-                    similarity_score: 0.5,
-                    personalization_score: 0.5,
-                    combined_score: 0.5,
-                    ranking_factors: HashMap::new(),
-                })
-                .collect());
+            // Use local ranking algorithm when vectorize is disabled
+            return self.rank_opportunities_locally(opportunities).await;
+        }
+
+        // Check if service is available before making API calls
+        if !self.is_service_available().await {
+            self.logger.info(&format!(
+                "Vectorize service unavailable, using local ranking for user: {}",
+                user_id
+            ));
+            return self.rank_opportunities_locally(opportunities).await;
         }
 
         // Try to retrieve user preference vector
         let user_vector = match self.get_user_preference_vector(user_id).await {
             Ok(vector) => vector,
             Err(_) => {
-                // If no user vector exists, return default ranking
+                // If no user vector exists, use local ranking
                 self.logger.info(&format!(
-                    "No user preference vector found for user: {}, using default ranking",
+                    "No user preference vector found for user: {}, using local ranking",
                     user_id
                 ));
-                return Ok(opportunities
-                    .iter()
-                    .map(|opp| RankedOpportunity {
-                        opportunity: opp.clone(),
-                        similarity_score: 0.5,
-                        personalization_score: 0.5,
-                        combined_score: 0.5,
-                        ranking_factors: HashMap::new(),
-                    })
-                    .collect());
+                return self.rank_opportunities_locally(opportunities).await;
             }
         };
 
-        // Rank each opportunity
+        // Rank each opportunity using AI-enhanced ranking
         let mut ranked_opportunities = Vec::new();
         for opportunity in opportunities {
             let ranking = self
@@ -419,12 +503,182 @@ impl VectorizeService {
         });
 
         self.logger.info(&format!(
-            "Ranked {} opportunities for user: {}",
+            "AI-ranked {} opportunities for user: {}",
             ranked_opportunities.len(),
             user_id
         ));
 
         Ok(ranked_opportunities)
+    }
+
+    /// Local ranking algorithm when Vectorize service is unavailable
+    /// Provides meaningful ranking based on opportunity characteristics
+    async fn rank_opportunities_locally(
+        &self,
+        opportunities: &[ArbitrageOpportunity],
+    ) -> ArbitrageResult<Vec<RankedOpportunity>> {
+        let mut ranked_opportunities = Vec::new();
+
+        for opportunity in opportunities {
+            // Calculate local ranking factors
+            let rate_difference_score = self.calculate_rate_difference_score(opportunity);
+            let risk_score = self.calculate_local_risk_score(opportunity);
+            let liquidity_score = self.calculate_local_liquidity_score(opportunity);
+            let time_sensitivity_score = self.calculate_local_time_sensitivity_score(opportunity);
+            let market_stability_score = self.calculate_local_market_stability_score(opportunity);
+
+            // Weighted combination of factors
+            let combined_score = (rate_difference_score * 0.3)
+                + (risk_score * 0.2)
+                + (liquidity_score * 0.2)
+                + (time_sensitivity_score * 0.15)
+                + (market_stability_score * 0.15);
+
+            let mut ranking_factors = HashMap::new();
+            ranking_factors.insert("rate_difference".to_string(), rate_difference_score);
+            ranking_factors.insert("risk_assessment".to_string(), risk_score);
+            ranking_factors.insert("liquidity".to_string(), liquidity_score);
+            ranking_factors.insert("time_sensitivity".to_string(), time_sensitivity_score);
+            ranking_factors.insert("market_stability".to_string(), market_stability_score);
+
+            ranked_opportunities.push(RankedOpportunity {
+                opportunity: opportunity.clone(),
+                similarity_score: 0.0, // Not applicable for local ranking
+                personalization_score: combined_score, // Use combined score as personalization
+                combined_score,
+                ranking_factors,
+            });
+        }
+
+        // Sort by combined score (highest first)
+        ranked_opportunities.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        self.logger.info(&format!(
+            "Locally ranked {} opportunities using fallback algorithm",
+            ranked_opportunities.len()
+        ));
+
+        Ok(ranked_opportunities)
+    }
+
+    /// Calculate rate difference score (higher rate difference = better score)
+    fn calculate_rate_difference_score(&self, opportunity: &ArbitrageOpportunity) -> f32 {
+        let rate_diff = opportunity.rate_difference;
+        // Normalize rate difference to 0-1 scale (0.1% to 2% range)
+        ((rate_diff - 0.001) / (0.02 - 0.001)).clamp(0.0, 1.0) as f32
+    }
+
+    /// Calculate local risk score (lower risk = better score)
+    fn calculate_local_risk_score(&self, opportunity: &ArbitrageOpportunity) -> f32 {
+        let mut risk_factors = 0.0;
+        let mut factor_count = 0.0;
+
+        // Exchange risk assessment
+        let exchange_risk = match (
+            opportunity.long_exchange.as_str(),
+            opportunity.short_exchange.as_str(),
+        ) {
+            ("binance", _) | (_, "binance") => 0.1, // Binance is low risk
+            ("bybit", _) | (_, "bybit") => 0.2,     // Bybit is medium-low risk
+            ("okx", _) | (_, "okx") => 0.3,         // OKX is medium risk
+            _ => 0.5,                               // Unknown exchanges are higher risk
+        };
+        risk_factors += exchange_risk;
+        factor_count += 1.0;
+
+        // Rate difference risk (very high rates might be suspicious)
+        let rate_risk = if opportunity.rate_difference.abs() > 0.05 {
+            0.8 // Very high rate difference is risky
+        } else if opportunity.rate_difference.abs() > 0.02 {
+            0.4 // High rate difference is moderately risky
+        } else {
+            0.1 // Normal rate difference is low risk
+        };
+        risk_factors += rate_risk;
+        factor_count += 1.0;
+
+        // Pair risk assessment
+        let pair_risk = match opportunity.pair.as_str() {
+            "BTCUSDT" | "ETHUSDT" => 0.1, // Major pairs are low risk
+            "SOLUSDT" | "ADAUSDT" => 0.2, // Popular alts are medium-low risk
+            _ => 0.4,                     // Other pairs are higher risk
+        };
+        risk_factors += pair_risk;
+        factor_count += 1.0;
+
+        // Convert to score (lower risk = higher score)
+        let average_risk = risk_factors / factor_count;
+        1.0 - average_risk
+    }
+
+    /// Calculate local liquidity score based on pair and exchanges
+    fn calculate_local_liquidity_score(&self, opportunity: &ArbitrageOpportunity) -> f32 {
+        let mut liquidity_score: f32 = 0.0;
+
+        // Pair liquidity
+        let pair_liquidity = match opportunity.pair.as_str() {
+            "BTCUSDT" => 1.0,
+            "ETHUSDT" => 0.9,
+            "SOLUSDT" => 0.7,
+            "ADAUSDT" | "DOTUSDT" | "LINKUSDT" => 0.6,
+            _ => 0.4,
+        };
+        liquidity_score += pair_liquidity * 0.6;
+
+        // Exchange liquidity
+        let exchange_liquidity = match (
+            opportunity.long_exchange.as_str(),
+            opportunity.short_exchange.as_str(),
+        ) {
+            ("binance", _) | (_, "binance") => 1.0,
+            ("bybit", _) | (_, "bybit") => 0.8,
+            ("okx", _) | (_, "okx") => 0.7,
+            _ => 0.5,
+        };
+        liquidity_score += exchange_liquidity * 0.4;
+
+        liquidity_score.clamp(0.0, 1.0)
+    }
+
+    /// Calculate time sensitivity score (fresher opportunities = better score)
+    fn calculate_local_time_sensitivity_score(&self, opportunity: &ArbitrageOpportunity) -> f32 {
+        let now = chrono::Utc::now().timestamp_millis() as u64;
+        let age_ms = now.saturating_sub(opportunity.timestamp);
+        let age_minutes = age_ms as f64 / (1000.0 * 60.0);
+
+        // Opportunities are best when fresh, degrade over time
+        if age_minutes < 1.0 {
+            1.0 // Very fresh
+        } else if age_minutes < 5.0 {
+            0.8 // Fresh
+        } else if age_minutes < 15.0 {
+            0.6 // Moderately fresh
+        } else if age_minutes < 30.0 {
+            0.4 // Getting stale
+        } else {
+            0.2 // Stale
+        }
+    }
+
+    /// Calculate market stability score based on rate difference consistency
+    fn calculate_local_market_stability_score(&self, opportunity: &ArbitrageOpportunity) -> f32 {
+        // For now, use rate difference as a proxy for stability
+        // More stable (moderate) rate differences are preferred
+        let rate_diff = opportunity.rate_difference.abs();
+
+        if (0.005..=0.015).contains(&rate_diff) {
+            1.0 // Sweet spot for arbitrage
+        } else if (0.002..=0.025).contains(&rate_diff) {
+            0.8 // Good range
+        } else if (0.001..=0.05).contains(&rate_diff) {
+            0.6 // Acceptable range
+        } else {
+            0.3 // Either too small or suspiciously large
+        }
     }
 
     /// Get personalized opportunities for a user based on their preferences
@@ -1109,13 +1363,66 @@ impl VectorizeService {
         })
     }
 
-    /// Health check for Vectorize service
+    /// Perform health check on Vectorize service
     pub async fn health_check(&self) -> ArbitrageResult<bool> {
         if !self.config.enabled {
             return Ok(false);
         }
 
-        Ok(true)
+        // Try a simple query to test service availability
+        let test_vector = vec![0.1; self.config.embedding_dimensions as usize];
+        let query = VectorizeQueryRequest {
+            vector: test_vector,
+            top_k: 1,
+            filter: None,
+            return_values: false,
+            return_metadata: false,
+        };
+
+        // Attempt health check with timeout and retry
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 3;
+
+        while attempts < MAX_ATTEMPTS {
+            attempts += 1;
+
+            let response_result = self.vectorize_query(&query).await;
+
+            match response_result {
+                Ok(response) => {
+                    let is_healthy = response.success;
+                    if is_healthy {
+                        return Ok(true);
+                    } else if attempts >= MAX_ATTEMPTS {
+                        self.logger.debug(&format!(
+                            "Vectorize health check failed after {} attempts: success={}",
+                            attempts, response.success
+                        ));
+                        return Ok(false);
+                    }
+                }
+                Err(e) => {
+                    if attempts >= MAX_ATTEMPTS {
+                        self.logger.debug(&format!(
+                            "Vectorize health check error after {} attempts: {}",
+                            attempts, e
+                        ));
+                        return Ok(false);
+                    }
+                }
+            }
+
+            // Wait before retry using worker-compatible delay
+            if attempts < MAX_ATTEMPTS {
+                // Use a simple delay mechanism compatible with WASM
+                let start = worker::Date::now().as_millis();
+                while worker::Date::now().as_millis() - start < 1000 {
+                    // Simple busy wait for 1 second - not ideal but WASM compatible
+                }
+            }
+        }
+
+        Ok(false)
     }
 
     /// Get service statistics

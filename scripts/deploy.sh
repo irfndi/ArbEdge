@@ -21,19 +21,28 @@ fi
 
 # Set required secrets
 echo "🔑 Setting up secrets..."
-echo "Please set the following secrets:"
 
 # Disable command echoing to prevent secrets from being logged
 set +x
 
-# Telegram Bot Token
-read -s -p "Enter TELEGRAM_BOT_TOKEN: " TELEGRAM_BOT_TOKEN
-echo
+# Telegram Bot Token - check environment variable first
+if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+    echo "TELEGRAM_BOT_TOKEN not found in environment variables."
+    read -s -p "Enter TELEGRAM_BOT_TOKEN: " TELEGRAM_BOT_TOKEN
+    echo
+else
+    echo "✅ Using TELEGRAM_BOT_TOKEN from environment variables"
+fi
 wrangler secret put TELEGRAM_BOT_TOKEN --env production <<< "$TELEGRAM_BOT_TOKEN"
 
-# Cloudflare API Token
-read -s -p "Enter CLOUDFLARE_API_TOKEN: " CLOUDFLARE_API_TOKEN
-echo
+# Cloudflare API Token - check environment variable first
+if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+    echo "CLOUDFLARE_API_TOKEN not found in environment variables."
+    read -s -p "Enter CLOUDFLARE_API_TOKEN: " CLOUDFLARE_API_TOKEN
+    echo
+else
+    echo "✅ Using CLOUDFLARE_API_TOKEN from environment variables"
+fi
 wrangler secret put CLOUDFLARE_API_TOKEN --env production <<< "$CLOUDFLARE_API_TOKEN"
 
 # Re-enable command echoing if it was previously enabled
@@ -135,6 +144,10 @@ echo "✅ wrangler.toml updated successfully"
 echo "🔄 Running D1 migrations..."
 wrangler d1 migrations apply arbitrage-production --env production
 
+# Run CI pipeline before deployment
+echo "🧪 Running CI pipeline to ensure code quality..."
+make ci
+
 # Build and deploy
 echo "🔨 Building and deploying Worker..."
 cargo install -q worker-build
@@ -155,4 +168,4 @@ echo "🔗 Useful commands:"
 echo "  View logs: wrangler tail --env production"
 echo "  Update secrets: wrangler secret put SECRET_NAME --env production"
 echo "  Check KV data: wrangler kv:key list --binding USER_PROFILES --env production"
-echo "  Query D1: wrangler d1 execute arbitrage-production --command 'SELECT * FROM users;' --env production" 
+echo "  Query D1: wrangler d1 execute arbitrage-production --command 'SELECT * FROM users;' --env production"

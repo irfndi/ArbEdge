@@ -17,10 +17,19 @@ LOG_LEVEL = "info"
 RATE_LIMIT_REQUESTS_PER_MINUTE = "60"
 CACHE_TTL_SECONDS = "300"
 SUPER_ADMIN_USER_ID = "1082762347"
+EXCHANGES = "binance,bybit,okx,bitget"
+MONITORED_PAIRS_CONFIG = '[{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","exchange_id":"binance"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","exchange_id":"binance"},{"symbol":"SOLUSDT","base":"SOL","quote":"USDT","exchange_id":"binance"}]'
+ARBITRAGE_THRESHOLD = "0.001"
 
 # KV Namespaces
 [[kv_namespaces]]
 binding = "ArbEdgeKV"
+id = "1018c576bf664c15afe0c53d85df8ed0"
+preview_id = "9db67fd132d64e93bcdf3cebebd07bc6"
+
+# Add ARBITRAGE_KV binding for legacy compatibility
+[[kv_namespaces]]
+binding = "ARBITRAGE_KV"
 id = "1018c576bf664c15afe0c53d85df8ed0"
 preview_id = "9db67fd132d64e93bcdf3cebebd07bc6"
 
@@ -119,6 +128,11 @@ dataset = "arbitrage_analytics"
 # Limits and performance
 [limits]
 cpu_ms = 30000  # 30 seconds max CPU time
+
+logpush = true
+[observability.logs]
+enabled = true
+
 
 # Development environment
 [env.development]

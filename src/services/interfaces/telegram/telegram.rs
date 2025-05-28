@@ -519,6 +519,45 @@ impl TelegramService {
         self.d1_service = Some(d1_service);
     }
 
+    /// Set the GlobalOpportunity service for opportunity management
+    pub fn set_global_opportunity_service(
+        &mut self,
+        global_opportunity_service: GlobalOpportunityService,
+    ) {
+        self.global_opportunity_service = Some(global_opportunity_service);
+    }
+
+    /// Set the AiIntegration service for AI analysis
+    pub fn set_ai_integration_service(&mut self, ai_integration_service: AiIntegrationService) {
+        self.ai_integration_service = Some(ai_integration_service);
+    }
+
+    /// Set the Exchange service for trading operations
+    pub fn set_exchange_service(&mut self, exchange_service: ExchangeService) {
+        self.exchange_service = Some(exchange_service);
+    }
+
+    /// Set the MarketAnalysis service for market data
+    pub fn set_market_analysis_service(&mut self, market_analysis_service: MarketAnalysisService) {
+        self.market_analysis_service = Some(market_analysis_service);
+    }
+
+    /// Set the TechnicalAnalysis service for technical analysis
+    pub fn set_technical_analysis_service(
+        &mut self,
+        technical_analysis_service: TechnicalAnalysisService,
+    ) {
+        self.technical_analysis_service = Some(technical_analysis_service);
+    }
+
+    /// Set the UserTradingPreferences service for user preferences
+    pub fn set_user_trading_preferences_service(
+        &mut self,
+        user_trading_preferences_service: UserTradingPreferencesService,
+    ) {
+        self.user_trading_preferences_service = Some(user_trading_preferences_service);
+    }
+
     /// Load group registrations from database into memory
     pub async fn load_group_registrations_from_database(&mut self) -> ArbitrageResult<()> {
         if let Some(ref d1_service) = self.d1_service {
@@ -2484,7 +2523,8 @@ impl TelegramService {
         ℹ️ *Information:*\n\
         /status \\- Check bot and system status\n\
         /help \\- Show this help message\n\n\
-        💡 *Tip:* Use /opportunities followed by a category name \\(e\\.g\\., `/opportunities arbitrage`\\) to filter results\\!".to_string()
+        💡 *Tip:* Use /opportunities followed by a category name \\(e\\.g\\., `/opportunities arbitrage`\\) to filter results\\!"
+            .to_string()
     }
 
     async fn get_status_message(&self, user_id: &str) -> String {

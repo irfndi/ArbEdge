@@ -1,10 +1,13 @@
 name: CI/CD & Security Analysis
 
+# CI Strategy:
+# - Run tests and security analysis on ALL branches and PRs
+# - Deploy to production only from main branch
 on:
   push:
-    branches: [development, main, feature/refactor-to-rust]
+    branches: ["**"]  # Run on all branches
   pull_request:
-    branches: [development, main]
+    branches: ["**"]  # Run on PRs to all branches
   workflow_dispatch:
 
 jobs:
@@ -99,6 +102,7 @@ jobs:
   deploy:
     name: Deploy to Cloudflare
     needs: [test, codeql]
+    # Only deploy from main branch on push (not PRs)
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:

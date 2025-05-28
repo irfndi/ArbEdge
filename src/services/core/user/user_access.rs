@@ -291,7 +291,7 @@ impl UserAccessService {
         let query = "
             SELECT user_id, access_level, date, arbitrage_opportunities_received, 
                    technical_opportunities_received, arbitrage_limit, technical_limit,
-                   last_reset, is_group_context, group_multiplier_applied
+                   last_reset, is_group_context, context_id
             FROM user_opportunity_limits 
             WHERE user_id = ? AND date = ? AND context_id = ?
         ";
@@ -318,44 +318,6 @@ impl UserAccessService {
                     .ok_or_else(|| ArbitrageError::parse_error("Missing user_id".to_string()))?
                     .to_string(),
                 access_level,
-                date: row
-                    .get("date")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ArbitrageError::parse_error("Missing date".to_string()))?
-                    .to_string(),
-                arbitrage_opportunities_received: row
-                    .get("arbitrage_opportunities_received")
-                    .and_then(|v| v.as_i64())
-                    .ok_or_else(|| {
-                        ArbitrageError::parse_error(
-                            "Missing arbitrage_opportunities_received".to_string(),
-                        )
-                    })? as u32,
-                technical_opportunities_received: row
-                    .get("technical_opportunities_received")
-                    .and_then(|v| v.as_i64())
-                    .ok_or_else(|| {
-                        ArbitrageError::parse_error(
-                            "Missing technical_opportunities_received".to_string(),
-                        )
-                    })? as u32,
-                arbitrage_limit: row
-                    .get("arbitrage_limit")
-                    .and_then(|v| v.as_i64())
-                    .ok_or_else(|| {
-                        ArbitrageError::parse_error("Missing arbitrage_limit".to_string())
-                    })? as u32,
-                technical_limit: row
-                    .get("technical_limit")
-                    .and_then(|v| v.as_i64())
-                    .ok_or_else(|| {
-                        ArbitrageError::parse_error("Missing technical_limit".to_string())
-                    })? as u32,
-                last_reset: row
-                    .get("last_reset")
-                    .and_then(|v| v.as_i64())
-                    .ok_or_else(|| ArbitrageError::parse_error("Missing last_reset".to_string()))?
-                    as u64,
                 is_group_context: row
                     .get("is_group_context")
                     .and_then(|v| v.as_i64())
@@ -363,13 +325,55 @@ impl UserAccessService {
                         ArbitrageError::parse_error("Missing is_group_context".to_string())
                     })?
                     != 0,
-                group_multiplier_applied: row
-                    .get("group_multiplier_applied")
+                daily_arbitrage_limit: row
+                    .get("arbitrage_limit")
                     .and_then(|v| v.as_i64())
                     .ok_or_else(|| {
-                        ArbitrageError::parse_error("Missing group_multiplier_applied".to_string())
-                    })?
-                    != 0,
+                        ArbitrageError::parse_error("Missing arbitrage_limit".to_string())
+                    })? as u32,
+                daily_technical_limit: row
+                    .get("technical_limit")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| {
+                        ArbitrageError::parse_error("Missing technical_limit".to_string())
+                    })? as u32,
+                current_arbitrage_count: row
+                    .get("arbitrage_opportunities_received")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| {
+                        ArbitrageError::parse_error(
+                            "Missing arbitrage_opportunities_received".to_string(),
+                        )
+                    })? as u32,
+                current_technical_count: row
+                    .get("technical_opportunities_received")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| {
+                        ArbitrageError::parse_error(
+                            "Missing technical_opportunities_received".to_string(),
+                        )
+                    })? as u32,
+                last_reset_date: row
+                    .get("date")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ArbitrageError::parse_error("Missing date".to_string()))?
+                    .to_string(),
+                rate_limit_window_minutes: if row
+                    .get("is_group_context")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0)
+                    != 0
+                {
+                    60
+                } else {
+                    15
+                },
+                opportunities_in_window: 0,
+                window_start_time: row
+                    .get("last_reset")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| ArbitrageError::parse_error("Missing last_reset".to_string()))?
+                    as u64,
             }))
         } else {
             Ok(None)
@@ -386,8 +390,8 @@ impl UserAccessService {
             INSERT INTO user_opportunity_limits (
                 user_id, access_level, date, arbitrage_opportunities_received,
                 technical_opportunities_received, arbitrage_limit, technical_limit,
-                last_reset, is_group_context, group_multiplier_applied, context_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_reset, is_group_context, context_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ";
 
         self.d1_service
@@ -396,14 +400,13 @@ impl UserAccessService {
                 &[
                     limits.user_id.clone().into(),
                     limits.access_level.to_string().into(),
-                    limits.date.clone().into(),
-                    limits.arbitrage_opportunities_received.into(),
-                    limits.technical_opportunities_received.into(),
-                    limits.arbitrage_limit.into(),
-                    limits.technical_limit.into(),
-                    (limits.last_reset as i64).into(),
+                    limits.last_reset_date.clone().into(),
+                    limits.current_arbitrage_count.into(),
+                    limits.current_technical_count.into(),
+                    limits.daily_arbitrage_limit.into(),
+                    limits.daily_technical_limit.into(),
+                    (limits.window_start_time as i64).into(),
                     (limits.is_group_context as i32).into(),
-                    (limits.group_multiplier_applied as i32).into(),
                     context_id.to_string().into(),
                 ],
             )
@@ -428,11 +431,11 @@ impl UserAccessService {
             .execute_query(
                 query,
                 &[
-                    limits.arbitrage_opportunities_received.into(),
-                    limits.technical_opportunities_received.into(),
-                    (limits.last_reset as i64).into(),
+                    limits.current_arbitrage_count.into(),
+                    limits.current_technical_count.into(),
+                    (limits.window_start_time as i64).into(),
                     limits.user_id.clone().into(),
-                    limits.date.clone().into(),
+                    limits.last_reset_date.clone().into(),
                 ],
             )
             .await?;
@@ -616,24 +619,24 @@ mod tests {
 
         // Test private context
         let mut limits = UserOpportunityLimits::new(user_id.clone(), access_level.clone(), false);
-        assert_eq!(limits.arbitrage_limit, 10);
-        assert_eq!(limits.technical_limit, 10);
-        assert!(!limits.group_multiplier_applied);
+        assert_eq!(limits.daily_arbitrage_limit, 10);
+        assert_eq!(limits.daily_technical_limit, 10);
+        assert!(!limits.is_group_context);
 
         // Test group context (2x multiplier)
         let group_limits = UserOpportunityLimits::new(user_id, access_level, true);
-        assert_eq!(group_limits.arbitrage_limit, 20);
-        assert_eq!(group_limits.technical_limit, 20);
-        assert!(group_limits.group_multiplier_applied);
+        assert_eq!(group_limits.daily_arbitrage_limit, 20);
+        assert_eq!(group_limits.daily_technical_limit, 20);
+        assert!(group_limits.is_group_context);
 
         // Test receiving opportunities
         assert!(limits.can_receive_arbitrage());
         assert!(limits.record_arbitrage_received());
-        assert_eq!(limits.arbitrage_opportunities_received, 1);
+        assert_eq!(limits.current_arbitrage_count, 1);
 
         assert!(limits.can_receive_technical());
         assert!(limits.record_technical_received());
-        assert_eq!(limits.technical_opportunities_received, 1);
+        assert_eq!(limits.current_technical_count, 1);
 
         // Test remaining opportunities
         let (remaining_arb, remaining_tech) = limits.get_remaining_opportunities();
@@ -644,15 +647,15 @@ mod tests {
     #[test]
     fn test_chat_context() {
         let private = ChatContext::Private;
-        let group = ChatContext::Group("123".to_string());
-        let channel = ChatContext::Channel("456".to_string());
+        let group = ChatContext::Group;
+        let channel = ChatContext::Channel;
 
         assert!(!private.is_group_context());
         assert!(group.is_group_context());
         assert!(channel.is_group_context());
 
         assert_eq!(private.get_context_id(), "private");
-        assert_eq!(group.get_context_id(), "group_123");
-        assert_eq!(channel.get_context_id(), "channel_456");
+        assert_eq!(group.get_context_id(), "group");
+        assert_eq!(channel.get_context_id(), "channel");
     }
 }

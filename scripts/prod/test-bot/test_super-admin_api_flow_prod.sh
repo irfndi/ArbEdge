@@ -135,23 +135,23 @@ validate_user_management() {
 }
 
 # Fetch real Super Admin credentials from production D1 database
-echo "🔍 Fetching real super admin data from production D1 database..."
-SUPER_ADMIN_USER_ID=$(wrangler d1 execute arb-edge-db --command="SELECT user_id FROM users WHERE subscription_tier = 'super_admin' LIMIT 1" --json | jq -r '.[0].results[0].user_id')
-SUPER_ADMIN_TELEGRAM_ID=$(wrangler d1 execute arb-edge-db --command="SELECT telegram_id FROM users WHERE subscription_tier = 'super_admin' LIMIT 1" --json | jq -r '.[0].results[0].telegram_id')
+echo "🔍 Fetching real admin data from production D1 database..."
+SUPER_ADMIN_USER_ID=$(wrangler d1 execute prod-arb-edge --command="SELECT user_id FROM user_profiles WHERE user_id LIKE '%superadmin%' LIMIT 1" --json | jq -r '.[0].results[0].user_id')
+SUPER_ADMIN_TELEGRAM_ID=$(wrangler d1 execute prod-arb-edge --command="SELECT telegram_id FROM user_profiles WHERE user_id LIKE '%superadmin%' LIMIT 1" --json | jq -r '.[0].results[0].telegram_id')
 
 if [ "$SUPER_ADMIN_USER_ID" = "null" ] || [ -z "$SUPER_ADMIN_USER_ID" ]; then
-    echo "❌ Error: No super admin user found in production D1 database"
-    echo "💡 Please ensure a super admin user exists in the users table"
+    echo "❌ Error: No admin user found in production D1 database"
+    echo "💡 Please ensure an admin user exists in the user_profiles table"
     exit 1
 fi
 
 if [ "$SUPER_ADMIN_TELEGRAM_ID" = "null" ] || [ -z "$SUPER_ADMIN_TELEGRAM_ID" ]; then
-    echo "❌ Error: No super admin telegram ID found in production D1 database"
-    echo "💡 Please ensure the super admin user has a valid telegram_id in the users table"
+    echo "❌ Error: No admin telegram ID found in production D1 database"
+    echo "💡 Please ensure the admin user has a valid telegram_id in the user_profiles table"
     exit 1
 fi
 
-echo "✅ Found super admin: $SUPER_ADMIN_USER_ID (Telegram ID: $SUPER_ADMIN_TELEGRAM_ID)"
+echo "✅ Found admin user: $SUPER_ADMIN_USER_ID (Telegram ID: $SUPER_ADMIN_TELEGRAM_ID)"
 
 # Start testing
 log "${PURPLE}🚀 Starting ArbEdge Production API Tests (Super Admin Only)${NC}"

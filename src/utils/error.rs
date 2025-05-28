@@ -257,7 +257,13 @@ impl From<worker::Error> for ArbitrageError {
 
 impl From<worker::kv::KvError> for ArbitrageError {
     fn from(err: worker::kv::KvError) -> Self {
-        ArbitrageError::database_error(format!("KV store error: {:?}", err))
+        Self::storage_error(format!("KV error: {:?}", err))
+    }
+}
+
+impl From<ArbitrageError> for worker::Error {
+    fn from(err: ArbitrageError) -> Self {
+        worker::Error::RustError(err.message)
     }
 }
 
