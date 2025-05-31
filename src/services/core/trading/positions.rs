@@ -114,7 +114,7 @@ impl<K: KvStoreInterface> PositionsService<K> {
         let mut risk_percentage_applied_for_audit: Option<f64> = None;
 
         if let Some(risk_perc) = position_data.risk_percentage {
-            if position_data.entry_price <= 0.0 {
+            if position_data.entry_price_long <= 0.0 {
                 return Err(ArbitrageError::validation_error(
                     "Entry price must be positive for risk-based sizing.".to_string(),
                 ));
@@ -126,15 +126,15 @@ impl<K: KvStoreInterface> PositionsService<K> {
                 amount_to_risk_usd = amount_to_risk_usd.min(max_usd);
             }
 
-            final_size_base_currency = amount_to_risk_usd / position_data.entry_price;
+            final_size_base_currency = amount_to_risk_usd / position_data.entry_price_long;
             calculated_size_usd_for_audit = Some(amount_to_risk_usd);
         } else if let Some(fixed_usd_size) = position_data.size_usd {
-            if position_data.entry_price <= 0.0 {
+            if position_data.entry_price_long <= 0.0 {
                 return Err(ArbitrageError::validation_error(
                     "Entry price must be positive for fixed USD sizing.".to_string(),
                 ));
             }
-            final_size_base_currency = fixed_usd_size / position_data.entry_price;
+            final_size_base_currency = fixed_usd_size / position_data.entry_price_long;
             calculated_size_usd_for_audit = Some(fixed_usd_size);
         } else {
             return Err(ArbitrageError::validation_error(
@@ -150,42 +150,52 @@ impl<K: KvStoreInterface> PositionsService<K> {
         }
 
         let position = ArbitragePosition {
-            id: id.clone(),
+            position_id: id.clone(),
+            user_id: "system".to_string(), // TODO: Use actual user_id
+            opportunity_id: "manual".to_string(), // TODO: Use actual opportunity_id if available
+            symbol: position_data.pair.clone(),
+            pair: position_data.pair.clone(),
+            long_exchange: position_data.exchange,
+            short_exchange: position_data.exchange, // For single exchange positions
             exchange: position_data.exchange,
-            pair: position_data.pair,
-            side: position_data.side,
-            size: final_size_base_currency,
-            entry_price: position_data.entry_price,
-            current_price: None,
-            pnl: None,
+            long_position_size: final_size_base_currency,
+            short_position_size: 0.0, // For single-sided positions
+            entry_price_long: position_data.entry_price_long,
+            entry_price_short: position_data.entry_price_long,
+            current_price_long: None,
+            current_price_short: None,
+            unrealized_pnl: 0.0,
+            realized_pnl: 0.0,
+            pnl: Some(0.0),
             status: PositionStatus::Open,
+            side: position_data.side,
+            leverage: 1.0, // Default leverage
+            margin_used: 0.0,
             created_at: now,
             updated_at: now,
+            closed_at: None,
+            volatility_score: None,
             calculated_size_usd: calculated_size_usd_for_audit,
-            risk_percentage_applied: risk_percentage_applied_for_audit,
-
-            // Advanced Risk Management Fields (Task 6)
             stop_loss_price: None,
             take_profit_price: None,
-            trailing_stop_distance: None,
             max_loss_usd: None,
-            risk_reward_ratio: None,
-
-            // Multi-Exchange Position Tracking (Task 6)
             related_positions: Vec::new(),
+            risk_reward_ratio: None,
+            holding_period_hours: None,
+
+            // Compatibility fields
+            id: Some(id.clone()),
+            size: Some(final_size_base_currency),
+            current_price: None,
+            risk_percentage_applied: risk_percentage_applied_for_audit,
+            trailing_stop_distance: None,
             hedge_position_id: None,
             position_group_id: None,
-
-            // Position Optimization (Task 6)
             optimization_score: None,
             recommended_action: None,
             last_optimization_check: None,
-
-            // Advanced Metrics (Task 6)
             max_drawdown: None,
             unrealized_pnl_percentage: None,
-            holding_period_hours: None,
-            volatility_score: None,
         };
 
         // Store position
@@ -234,7 +244,8 @@ impl<K: KvStoreInterface> PositionsService<K> {
 
         // Update fields if provided
         if let Some(size) = update_data.size {
-            position.size = size;
+            position.size = Some(size);
+            position.long_position_size = size; // Update the actual position size
         }
         if let Some(current_price) = update_data.current_price {
             position.current_price = Some(current_price);
@@ -371,18 +382,24 @@ impl<K: KvStoreInterface> PositionsService<K> {
         // Validate stop-loss price based on position side
         match position.side {
             PositionSide::Long => {
-                if stop_loss_price >= position.entry_price {
+                if stop_loss_price >= position.entry_price_long {
                     return Err(ArbitrageError::validation_error(
                         "Stop-loss price for long position must be below entry price".to_string(),
                     ));
                 }
             }
             PositionSide::Short => {
-                if stop_loss_price <= position.entry_price {
+                if stop_loss_price <= position.entry_price_short {
                     return Err(ArbitrageError::validation_error(
                         "Stop-loss price for short position must be above entry price".to_string(),
                     ));
                 }
+            }
+            PositionSide::Both => {
+                // For hedge positions, validate against both entry prices
+                return Err(ArbitrageError::validation_error(
+                    "Stop-loss validation for hedge positions not implemented".to_string(),
+                ));
             }
         }
 
@@ -390,8 +407,8 @@ impl<K: KvStoreInterface> PositionsService<K> {
         position.updated_at = chrono::Utc::now().timestamp_millis() as u64;
 
         // Calculate max loss in USD
-        let price_diff = (position.entry_price - stop_loss_price).abs();
-        position.max_loss_usd = Some(price_diff * position.size);
+        let price_diff = (position.entry_price_long - stop_loss_price).abs();
+        position.max_loss_usd = Some(price_diff * position.size.unwrap_or(0.0));
 
         // Store updated position
         let key = format!("position:{}", position_id);
@@ -420,19 +437,25 @@ impl<K: KvStoreInterface> PositionsService<K> {
         // Validate take-profit price based on position side
         match position.side {
             PositionSide::Long => {
-                if take_profit_price <= position.entry_price {
+                if take_profit_price <= position.entry_price_long {
                     return Err(ArbitrageError::validation_error(
                         "Take-profit price for long position must be above entry price".to_string(),
                     ));
                 }
             }
             PositionSide::Short => {
-                if take_profit_price >= position.entry_price {
+                if take_profit_price >= position.entry_price_short {
                     return Err(ArbitrageError::validation_error(
                         "Take-profit price for short position must be below entry price"
                             .to_string(),
                     ));
                 }
+            }
+            PositionSide::Both => {
+                // For hedge positions, validate against both entry prices
+                return Err(ArbitrageError::validation_error(
+                    "Take-profit validation for hedge positions not implemented".to_string(),
+                ));
             }
         }
 
@@ -441,8 +464,8 @@ impl<K: KvStoreInterface> PositionsService<K> {
 
         // Calculate risk/reward ratio if stop-loss is set
         if let Some(stop_loss) = position.stop_loss_price {
-            let risk = (position.entry_price - stop_loss).abs();
-            let reward = (take_profit_price - position.entry_price).abs();
+            let risk = (position.entry_price_long - stop_loss).abs();
+            let reward = (take_profit_price - position.entry_price_long).abs();
             position.risk_reward_ratio = Some(reward / risk);
         }
 
@@ -509,14 +532,19 @@ impl<K: KvStoreInterface> PositionsService<K> {
 
         // Calculate PnL
         let price_diff = match position.side {
-            PositionSide::Long => current_price - position.entry_price,
-            PositionSide::Short => position.entry_price - current_price,
+            PositionSide::Long => current_price - position.entry_price_long,
+            PositionSide::Short => position.entry_price_long - current_price,
+            PositionSide::Both => {
+                // For hedge positions, calculate combined PnL from both sides
+                // This is a simplified implementation - in practice, you'd track both positions separately
+                current_price - position.entry_price_long
+            }
         };
-        let pnl = price_diff * position.size;
+        let pnl = price_diff * position.size.unwrap_or(0.0);
         position.pnl = Some(pnl);
 
         // Calculate unrealized PnL percentage
-        let entry_value = position.entry_price * position.size;
+        let entry_value = position.entry_price_long * position.size.unwrap_or(0.0);
         position.unrealized_pnl_percentage = Some((pnl / entry_value) * 100.0);
 
         // Update max drawdown
@@ -538,6 +566,11 @@ impl<K: KvStoreInterface> PositionsService<K> {
             let new_stop_loss = match position.side {
                 PositionSide::Long => current_price - trailing_distance,
                 PositionSide::Short => current_price + trailing_distance,
+                PositionSide::Both => {
+                    // For hedge positions, use the long side logic as default
+                    // TODO: Implement proper hedge position update logic
+                    current_price - trailing_distance
+                }
             };
 
             // Only update if the new stop-loss is more favorable
@@ -545,6 +578,11 @@ impl<K: KvStoreInterface> PositionsService<K> {
                 let should_update = match position.side {
                     PositionSide::Long => new_stop_loss > current_stop_loss,
                     PositionSide::Short => new_stop_loss < current_stop_loss,
+                    PositionSide::Both => {
+                        // For hedge positions, use the long side logic as default
+                        // TODO: Implement proper hedge position update logic
+                        new_stop_loss > current_stop_loss
+                    }
                 };
                 if should_update {
                     position.stop_loss_price = Some(new_stop_loss);
@@ -590,6 +628,11 @@ impl<K: KvStoreInterface> PositionsService<K> {
                 let should_close = match position.side {
                     PositionSide::Long => current_price <= stop_loss,
                     PositionSide::Short => current_price >= stop_loss,
+                    PositionSide::Both => {
+                        // For hedge positions, check both sides
+                        // This is a simplified implementation
+                        current_price <= stop_loss || current_price >= stop_loss
+                    }
                 };
                 if should_close {
                     return Ok(Some(PositionAction::Close));
@@ -601,6 +644,11 @@ impl<K: KvStoreInterface> PositionsService<K> {
                 let should_close = match position.side {
                     PositionSide::Long => current_price >= take_profit,
                     PositionSide::Short => current_price <= take_profit,
+                    PositionSide::Both => {
+                        // For hedge positions, check both sides
+                        // This is a simplified implementation
+                        current_price >= take_profit || current_price <= take_profit
+                    }
                 };
                 if should_close {
                     return Ok(Some(PositionAction::Close));
@@ -732,21 +780,23 @@ impl<K: KvStoreInterface> PositionsService<K> {
         // Suggest stop-loss if not set
         if position.stop_loss_price.is_none() {
             score -= 10.0;
-            recommended_action = PositionAction::SetStopLoss;
-            let stop_loss_distance = position.entry_price * config.default_stop_loss_percentage;
+            recommended_action = PositionAction::StopLoss;
+            let stop_loss_distance = position.entry_price_long * config.stop_loss_percentage;
             suggested_stop_loss = Some(match position.side {
-                PositionSide::Long => position.entry_price - stop_loss_distance,
-                PositionSide::Short => position.entry_price + stop_loss_distance,
+                PositionSide::Long => position.entry_price_long - stop_loss_distance,
+                PositionSide::Short => position.entry_price_long + stop_loss_distance,
+                PositionSide::Both => position.entry_price_long - stop_loss_distance, // Default to long side
             });
             reasoning.push_str("No stop-loss set. ");
         }
 
         // Suggest take-profit if not set
         if position.take_profit_price.is_none() {
-            let take_profit_distance = position.entry_price * config.default_take_profit_percentage;
+            let take_profit_distance = position.entry_price_long * config.take_profit_percentage;
             suggested_take_profit = Some(match position.side {
-                PositionSide::Long => position.entry_price + take_profit_distance,
-                PositionSide::Short => position.entry_price - take_profit_distance,
+                PositionSide::Long => position.entry_price_long + take_profit_distance,
+                PositionSide::Short => position.entry_price_long - take_profit_distance,
+                PositionSide::Both => position.entry_price_long + take_profit_distance, // Default to long side
             });
             reasoning.push_str("Consider setting take-profit. ");
         }
@@ -763,15 +813,15 @@ impl<K: KvStoreInterface> PositionsService<K> {
         };
 
         let risk_assessment = RiskAssessment {
-            overall_risk_score: 100.0 - score,
+            overall_risk_level: risk_level.clone(),
+            risk_score: 100.0 - score,
             market_risk: 0.0,
-            liquidity_risk: 0.0,
             volatility_risk: position.volatility_score.unwrap_or(0.0),
             correlation_risk: 0.0,
-            recommendations: vec!["Position analysis completed".to_string()],
+            recommendations: vec![reasoning.clone()],
             max_position_size: position.calculated_size_usd.unwrap_or(0.0),
-            stop_loss_recommendation: suggested_stop_loss,
-            take_profit_recommendation: suggested_take_profit,
+            stop_loss_recommendation: suggested_stop_loss.unwrap_or(0.0),
+            take_profit_recommendation: suggested_take_profit.unwrap_or(0.0),
             risk_level,
             concentration_risk: 0.0,
         };
@@ -784,16 +834,18 @@ impl<K: KvStoreInterface> PositionsService<K> {
 
         let result = PositionOptimizationResult {
             position_id: position_id.to_string(),
+            optimization_score: score,
             current_score: score,
             optimized_score: score + 10.0, // Placeholder improvement
-            recommended_actions: vec![recommended_action.clone()],
+            recommended_actions: vec![format!("{:?}", recommended_action)],
             risk_assessment,
             expected_improvement: 10.0, // Placeholder improvement percentage
+            confidence: confidence_level,
             confidence_level,
             recommended_action,
             reasoning,
-            suggested_stop_loss,
-            suggested_take_profit,
+            suggested_stop_loss: suggested_stop_loss.unwrap_or(0.0),
+            suggested_take_profit: suggested_take_profit.unwrap_or(0.0),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
         };
 
@@ -987,7 +1039,7 @@ pub struct CreatePositionData {
     pub pair: String,
     pub side: PositionSide,
     pub size_usd: Option<f64>,
-    pub entry_price: f64,
+    pub entry_price_long: f64,
     pub risk_percentage: Option<f64>,
     pub max_size_usd: Option<f64>,
 }
@@ -1013,7 +1065,7 @@ mod tests {
             pair: pair.to_string(),
             side: PositionSide::Long,
             size: 1000.0, // Base currency amount
-            entry_price: 45000.0,
+            entry_price_long: 45000.0,
             current_price: Some(45100.0),
             pnl: Some(15.5),
             status: PositionStatus::Open,
@@ -1055,7 +1107,7 @@ mod tests {
             pair: "BTCUSDT".to_string(),
             side: PositionSide::Long,
             size_usd,
-            entry_price,
+            entry_price_long: entry_price,
             risk_percentage,
             max_size_usd,
         }

@@ -62,10 +62,11 @@ The specific responsibilities and actions for each role are as follows:
 - When interacting with the human user, don't give answers or responses to anything you're not 100% confident you fully understand. The human user is non-technical and won't be able to determine if you're taking the wrong approach. If you're not sure about something, just say it.
 - human will manual move the plan docs to `implementation-done` or `implementation-cancel` if the plan already finish/cancel (you can use it as future reference if needs to read it)
 - if `scratchpad.md` already long, human will manual move to `/docs/old-scratchpad` , you can see as need it.
+- when consider change/anything on database, read existing migration, dont update/edit existing migration, instead check what already applied create new changes based on existing applied pattern, minimizing data broken/failed adjustment, while preserving existing data (if any).
 
 ### User Specified Lessons
 
 - Include info useful for debugging in the program output.
 - Read the file before you try to edit it.
-- If there are vulnerabilities that appear in the terminal, run npm audit before proceeding
+- If there are vulnerabilities that appear in the terminal, run audit before proceeding (if applicable)
 - Always ask before using the -force git command

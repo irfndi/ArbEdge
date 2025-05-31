@@ -1,7 +1,7 @@
 // User Trading Preferences Service
 // Task 1.5: Trading focus selection and automation preferences management
 
-use crate::services::D1Service;
+use crate::services::core::infrastructure::DatabaseManager;
 use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -294,14 +294,14 @@ impl PreferenceValidationResult {
 // ============= USER TRADING PREFERENCES SERVICE =============
 
 pub struct UserTradingPreferencesService {
-    d1_service: D1Service,
+    d1_service: DatabaseManager,
     logger: Logger,
     // Simple in-memory cache with TTL of 5 minutes for frequently accessed preferences
     cache: Arc<Mutex<HashMap<String, (UserTradingPreferences, u64)>>>, // (prefs, timestamp)
 }
 
 impl UserTradingPreferencesService {
-    pub fn new(d1_service: D1Service, logger: Logger) -> Self {
+    pub fn new(d1_service: DatabaseManager, logger: Logger) -> Self {
         Self {
             d1_service,
             logger,
@@ -444,15 +444,14 @@ impl UserTradingPreferencesService {
             user_id
         ));
 
-        // Use the existing delete method from D1Service
-        let result = self.d1_service.delete_trading_preferences(user_id).await;
+        // Delete from D1 (persistent storage)
+        self.d1_service.delete_trading_preferences(user_id).await?;
 
-        // Invalidate cache after successful deletion
-        if result.is_ok() {
-            self.invalidate_cache(user_id);
-        }
+        // Invalidate in-memory cache
+        self.invalidate_cache(user_id);
 
-        result
+        // Return true if deletion was successful (we assume it was since D1 didn't error)
+        Ok(true)
     }
 
     /// Update trading focus

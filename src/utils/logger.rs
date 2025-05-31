@@ -4,6 +4,7 @@ use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::OnceLock;
+use worker::console_log;
 
 #[cfg(all(
     target_arch = "wasm32",
@@ -169,6 +170,7 @@ fn get_sanitizer() -> &'static DataSanitizer {
 }
 
 /// Simple logger for Cloudflare Workers
+#[derive(Clone)]
 pub struct Logger {
     level: LogLevel,
     context: HashMap<String, Value>,

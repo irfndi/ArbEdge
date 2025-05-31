@@ -3,6 +3,7 @@
 pub mod calculations;
 pub mod core_architecture;
 pub mod error;
+pub mod feature_flags;
 pub mod formatter;
 pub mod helpers;
 pub mod kv_standards;

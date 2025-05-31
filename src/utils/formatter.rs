@@ -457,21 +457,41 @@ pub fn format_opportunity_message(opportunity: &ArbitrageOpportunity) -> String 
                 diff_escaped
             ));
         }
-        _ => {
-            // Generic message for other types or if specific fields are missing
-            let type_str = match opportunity.r#type {
-                ArbitrageType::FundingRate => "Funding Rate",
-                ArbitrageType::SpotFutures => "Spot Futures",
-                ArbitrageType::CrossExchange => "Cross Exchange",
-            };
+        ArbitrageType::SpotFutures => {
             message.push_str(&format!(
-                "\nℹ️ *Type:* {}\n💰 *Gross Metric:* `{}%`",
-                escape_markdown_v2(type_str),
+                "\n↔️ *Action:* LONG `{}` / SHORT `{}`\n\n*Rates \\(Spot-Futures\\):*\n   \\- Long \\({}\\): `{}%`\n   \\- Short \\({}\\): `{}%`\n💰 *Gross Difference:* `{}%`",
+                long_exchange_escaped,
+                short_exchange_escaped,
+                long_exchange_escaped,
+                long_rate_escaped,
+                short_exchange_escaped,
+                short_rate_escaped,
                 diff_escaped
             ));
-
-            message.push_str(&format!("\n➡️ *Exchange 1:* `{}`", long_exchange_escaped));
-            message.push_str(&format!("\n⬅️ *Exchange 2:* `{}`", short_exchange_escaped));
+        }
+        ArbitrageType::CrossExchange => {
+            message.push_str(&format!(
+                "\n↔️ *Action:* LONG `{}` / SHORT `{}`\n\n*Rates \\(Cross Exchange\\):*\n   \\- Long \\({}\\): `{}%`\n   \\- Short \\({}\\): `{}%`\n💰 *Gross Difference:* `{}%`",
+                long_exchange_escaped,
+                short_exchange_escaped,
+                long_exchange_escaped,
+                long_rate_escaped,
+                short_exchange_escaped,
+                short_rate_escaped,
+                diff_escaped
+            ));
+        }
+        ArbitrageType::Price => {
+            message.push_str(&format!(
+                "\n↔️ *Action:* LONG `{}` / SHORT `{}`\n\n*Rates \\(Price Arbitrage\\):*\n   \\- Long \\({}\\): `{}%`\n   \\- Short \\({}\\): `{}%`\n💰 *Gross Difference:* `{}%`",
+                long_exchange_escaped,
+                short_exchange_escaped,
+                long_exchange_escaped,
+                long_rate_escaped,
+                short_exchange_escaped,
+                short_rate_escaped,
+                diff_escaped
+            ));
         }
     }
 
@@ -557,12 +577,10 @@ mod tests {
             "BTC/USDT".to_string(),
             ExchangeIdEnum::Binance,
             ExchangeIdEnum::Bybit,
-            Some(0.0001),
-            Some(-0.0005),
-            0.0006,
-            ArbitrageType::FundingRate,
-        )
-        .unwrap_or_else(|_| ArbitrageOpportunity::default());
+            0.0001,  // rate_difference as f64
+            10000.0, // volume as f64
+            0.0006,  // confidence as f64
+        );
 
         // Set a fixed timestamp to avoid WASM binding issues in tests
         opportunity.timestamp = 1640995200000; // 2022-01-01 00:00:00 UTC

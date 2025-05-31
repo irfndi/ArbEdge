@@ -1,8 +1,9 @@
-use crate::services::core::infrastructure::d1_database::D1Service;
+use crate::services::core::infrastructure::database_repositories::DatabaseManager;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 // Constants for affiliation calculations
@@ -115,19 +116,19 @@ pub enum PerformanceTier {
 }
 
 pub struct AffiliationService {
-    d1_service: D1Service,
+    d1_service: DatabaseManager,
     config: AffiliationConfig,
 }
 
 impl AffiliationService {
-    pub fn new(d1_service: D1Service) -> Self {
+    pub fn new(d1_service: DatabaseManager) -> Self {
         Self {
             d1_service,
             config: AffiliationConfig::default(),
         }
     }
 
-    pub fn new_with_config(d1_service: D1Service, config: AffiliationConfig) -> Self {
+    pub fn new_with_config(d1_service: DatabaseManager, config: AffiliationConfig) -> Self {
         Self { d1_service, config }
     }
 
@@ -211,7 +212,8 @@ impl AffiliationService {
 
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
+        let results_vec = result.results::<HashMap<String, serde_json::Value>>()?;
+        if let Some(row) = results_vec.first() {
             Ok(Some(self.parse_affiliation_program_from_row(row)?))
         } else {
             Ok(None)
@@ -287,7 +289,8 @@ impl AffiliationService {
         let result = self.d1_service.query(query, &[]).await?;
 
         let mut applications = Vec::new();
-        for row in result {
+        let results_vec = result.results::<HashMap<String, serde_json::Value>>()?;
+        for row in results_vec {
             applications.push(self.parse_application_from_row(&row)?);
         }
 
@@ -363,6 +366,7 @@ impl AffiliationService {
 
         // Collect user IDs for concurrent processing
         let user_ids: Vec<String> = result
+            .results::<HashMap<String, serde_json::Value>>()?
             .iter()
             .filter_map(|row| row.get("user_id").map(|id| id.to_string()))
             .collect();
@@ -442,13 +446,10 @@ impl AffiliationService {
 
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
-            let count_str = row.get("count").ok_or_else(|| {
-                ArbitrageError::parse_error("Missing count field in database result")
-            })?;
-            let count = count_str.parse::<i32>().map_err(|e| {
-                ArbitrageError::parse_error(format!("Invalid count format '{}': {}", count_str, e))
-            })?;
+        let results_vec = result.results::<HashMap<String, serde_json::Value>>()?;
+        if let Some(row) = results_vec.first() {
+            let count_str = row.get("count").and_then(|v| v.as_str()).unwrap_or("0");
+            let count: i32 = count_str.parse().unwrap_or(0);
             Ok(count > 0)
         } else {
             Ok(false)
@@ -461,16 +462,17 @@ impl AffiliationService {
             "SELECT profile_metadata, subscription_tier FROM user_profiles WHERE user_id = ?";
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
+        let results_vec = result.results::<HashMap<String, serde_json::Value>>()?;
+        if let Some(row) = results_vec.first() {
             // Check subscription tier
-            if let Some(tier_str) = row.get("subscription_tier") {
+            if let Some(tier_str) = row.get("subscription_tier").and_then(|v| v.as_str()) {
                 if tier_str == "SuperAdmin" {
                     return Ok(true);
                 }
             }
 
             // Check role in metadata
-            if let Some(metadata_str) = row.get("profile_metadata") {
+            if let Some(metadata_str) = row.get("profile_metadata").and_then(|v| v.as_str()) {
                 if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(metadata_str) {
                     if let Some(role) = metadata.get("role") {
                         if role == "SuperAdmin" {
@@ -621,8 +623,8 @@ impl AffiliationService {
                     format!("{:?}", program.verification_status).into(),
                     program
                         .follower_count
-                        .map(|f| f.into())
-                        .unwrap_or_else(|| serde_json::Value::Null),
+                        .map(worker::wasm_bindgen::JsValue::from)
+                        .unwrap_or_else(|| worker::wasm_bindgen::JsValue::NULL),
                     program.platform.clone().unwrap_or_default().into(),
                     program.kickback_rate.into(),
                     serde_json::to_string(&program.special_features)
@@ -664,7 +666,10 @@ impl AffiliationService {
             .query(query, &[application_id.into()])
             .await?;
 
-        if let Some(row) = result.first() {
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
             self.parse_application_from_row(row)
         } else {
             Err(ArbitrageError::not_found("Application not found"))
@@ -673,116 +678,153 @@ impl AffiliationService {
 
     fn parse_application_from_row(
         &self,
-        row: &std::collections::HashMap<String, String>,
+        row: &HashMap<String, serde_json::Value>,
     ) -> ArbitrageResult<AffiliationApplication> {
         Ok(AffiliationApplication {
             id: row
                 .get("id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| ArbitrageError::parse_error("Missing required field: id"))?
-                .clone(),
+                .to_string(),
             user_id: row
                 .get("user_id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| ArbitrageError::parse_error("Missing required field: user_id"))?
-                .clone(),
-            program_type: self.parse_program_type(row.get("program_type").ok_or_else(|| {
-                ArbitrageError::parse_error("Missing required field: program_type")
-            })?)?,
+                .to_string(),
+            program_type: self.parse_program_type(
+                row.get("program_type")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        ArbitrageError::parse_error("Missing required field: program_type")
+                    })?,
+            )?,
             platform: row
                 .get("platform")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| ArbitrageError::parse_error("Missing required field: platform"))?
-                .clone(),
+                .to_string(),
             follower_count: row
                 .get("follower_count")
-                .ok_or_else(|| ArbitrageError::parse_error("Missing follower_count field"))?
-                .parse()
-                .map_err(|e| {
-                    ArbitrageError::parse_error(format!("Invalid follower_count format: {}", e))
-                })?,
-            content_examples: serde_json::from_str(row.get("content_examples").ok_or_else(
-                || ArbitrageError::parse_error("Missing required field: content_examples"),
-            )?)
-            .map_err(|e| {
-                ArbitrageError::parse_error(format!("Invalid content_examples JSON: {}", e))
-            })?,
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32)
+                .ok_or_else(|| ArbitrageError::parse_error("Missing follower_count field"))?,
+            content_examples: row
+                .get("content_examples")
+                .and_then(|v| v.as_str())
+                .map(|s| serde_json::from_str(s).unwrap_or_default())
+                .unwrap_or_default(),
             trading_experience: row
                 .get("trading_experience")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| {
                     ArbitrageError::parse_error("Missing required field: trading_experience")
                 })?
-                .clone(),
+                .to_string(),
             motivation: row
                 .get("motivation")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| ArbitrageError::parse_error("Missing required field: motivation"))?
-                .clone(),
-            status: self
-                .parse_verification_status(row.get("status").ok_or_else(|| {
-                    ArbitrageError::parse_error("Missing required field: status")
-                })?)?,
-            created_at: DateTime::parse_from_rfc3339(row.get("created_at").ok_or_else(|| {
-                ArbitrageError::parse_error("Missing required field: created_at")
-            })?)
-            .map_err(|e| ArbitrageError::parse_error(format!("Invalid created_at format: {}", e)))?
-            .with_timezone(&Utc),
+                .to_string(),
+            status: self.parse_verification_status(
+                row.get("status")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ArbitrageError::parse_error("Missing required field: status"))?,
+            )?,
+            created_at: row
+                .get("created_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok_or_else(|| {
+                    ArbitrageError::parse_error("Missing or invalid created_at field")
+                })?,
             reviewed_at: row
                 .get("reviewed_at")
+                .and_then(|v| v.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|dt| dt.with_timezone(&Utc)),
-            reviewed_by: row.get("reviewed_by").cloned(),
-            review_notes: row.get("review_notes").cloned(),
+            reviewed_by: row
+                .get("reviewed_by")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            review_notes: row
+                .get("review_notes")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         })
     }
 
     fn parse_affiliation_program_from_row(
         &self,
-        row: &std::collections::HashMap<String, String>,
+        row: &HashMap<String, serde_json::Value>,
     ) -> ArbitrageResult<AffiliationProgram> {
         Ok(AffiliationProgram {
             id: row
                 .get("id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| ArbitrageError::parse_error("Missing required field: id"))?
-                .clone(),
+                .to_string(),
             user_id: row
                 .get("user_id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| ArbitrageError::parse_error("Missing required field: user_id"))?
-                .clone(),
-            program_type: self.parse_program_type(row.get("program_type").ok_or_else(|| {
-                ArbitrageError::parse_error("Missing required field: program_type")
-            })?)?,
-            verification_status: self.parse_verification_status(
-                row.get("verification_status").ok_or_else(|| {
-                    ArbitrageError::parse_error("Missing required field: verification_status")
-                })?,
+                .to_string(),
+            program_type: self.parse_program_type(
+                row.get("program_type")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        ArbitrageError::parse_error("Missing required field: program_type")
+                    })?,
             )?,
-            follower_count: row.get("follower_count").and_then(|s| s.parse().ok()),
-            platform: row.get("platform").cloned(),
+            verification_status: self.parse_verification_status(
+                row.get("verification_status")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        ArbitrageError::parse_error("Missing required field: verification_status")
+                    })?,
+            )?,
+            follower_count: row
+                .get("follower_count")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32),
+            platform: row
+                .get("platform")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             kickback_rate: row
                 .get("kickback_rate")
-                .ok_or_else(|| ArbitrageError::parse_error("Missing kickback_rate field"))?
-                .parse()
-                .map_err(|e| {
-                    ArbitrageError::parse_error(format!("Invalid kickback_rate format: {}", e))
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| ArbitrageError::parse_error("Missing kickback_rate field"))?,
+            special_features: row
+                .get("special_features")
+                .and_then(|v| v.as_str())
+                .map(|s| serde_json::from_str(s).unwrap_or_default())
+                .unwrap_or_default(),
+            created_at: row
+                .get("created_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok_or_else(|| {
+                    ArbitrageError::parse_error("Missing or invalid created_at field")
                 })?,
-            special_features: serde_json::from_str(row.get("special_features").ok_or_else(
-                || ArbitrageError::parse_error("Missing required field: special_features"),
-            )?)
-            .map_err(|e| {
-                ArbitrageError::parse_error(format!("Invalid special_features JSON: {}", e))
-            })?,
-            created_at: DateTime::parse_from_rfc3339(row.get("created_at").ok_or_else(|| {
-                ArbitrageError::parse_error("Missing required field: created_at")
-            })?)
-            .map_err(|e| ArbitrageError::parse_error(format!("Invalid created_at format: {}", e)))?
-            .with_timezone(&Utc),
-            updated_at: DateTime::parse_from_rfc3339(row.get("updated_at").ok_or_else(|| {
-                ArbitrageError::parse_error("Missing required field: updated_at")
-            })?)
-            .map_err(|e| ArbitrageError::parse_error(format!("Invalid updated_at format: {}", e)))?
-            .with_timezone(&Utc),
+            updated_at: row
+                .get("updated_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok_or_else(|| {
+                    ArbitrageError::parse_error("Missing or invalid updated_at field")
+                })?,
             verified_at: row
                 .get("verified_at")
+                .and_then(|v| v.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
                 .map(|dt| dt.with_timezone(&Utc)),
-            verified_by: row.get("verified_by").cloned(),
+            verified_by: row
+                .get("verified_by")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         })
     }
 
@@ -841,15 +883,13 @@ impl AffiliationService {
             )
             .await?;
 
-        if let Some(row) = result.first() {
-            let count_str = row.get("count").map_or("0", |v| v);
-            match count_str.parse::<u32>() {
-                Ok(count) => Ok(count),
-                Err(e) => Err(ArbitrageError::parse_error(format!(
-                    "Failed to parse referral count '{}': {}",
-                    count_str, e
-                ))),
-            }
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let count_str = row.get("count").and_then(|v| v.as_str()).unwrap_or("0");
+            let count: i32 = count_str.parse().unwrap_or(0);
+            Ok(count as u32)
         } else {
             Ok(0)
         }
@@ -883,15 +923,13 @@ impl AffiliationService {
             )
             .await?;
 
-        if let Some(row) = result.first() {
-            let count_str = row.get("count").map_or("0", |v| v);
-            match count_str.parse::<u32>() {
-                Ok(count) => Ok(count),
-                Err(e) => Err(ArbitrageError::parse_error(format!(
-                    "Failed to parse conversion count '{}': {}",
-                    count_str, e
-                ))),
-            }
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let count_str = row.get("count").and_then(|v| v.as_str()).unwrap_or("0");
+            let count: i32 = count_str.parse().unwrap_or(0);
+            Ok(count as u32)
         } else {
             Ok(0)
         }
@@ -923,17 +961,15 @@ impl AffiliationService {
             )
             .await?;
 
-        let total_bonuses = if let Some(row) = bonus_result.first() {
-            let bonus_str = row.get("total_bonuses").map_or("0", |v| v);
-            match bonus_str.parse::<f64>() {
-                Ok(bonuses) => bonuses,
-                Err(e) => {
-                    return Err(ArbitrageError::parse_error(format!(
-                        "Failed to parse total bonuses '{}': {}",
-                        bonus_str, e
-                    )));
-                }
-            }
+        let total_bonuses = if let Some(row) = bonus_result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let bonus_str = row
+                .get("total_bonuses")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0.0");
+            bonus_str.parse().unwrap_or(0.0)
         } else {
             0.0
         };

@@ -80,12 +80,13 @@ pub async fn check_user_permissions(user_id: &str, required_tier: &str, env: &En
         // Store development tier in KV for consistency
         let tier_str = match dev_tier {
             types::SubscriptionTier::Free => "Free",
-            types::SubscriptionTier::Basic => "Basic",
-            types::SubscriptionTier::Premium => "Premium",
-            types::SubscriptionTier::Enterprise => "Enterprise",
-            types::SubscriptionTier::Pro => "Pro",
+            types::SubscriptionTier::Paid => "Paid",
             types::SubscriptionTier::Admin => "Admin",
             types::SubscriptionTier::SuperAdmin => "SuperAdmin",
+            types::SubscriptionTier::Basic => "Basic",
+            types::SubscriptionTier::Premium => "Premium",
+            types::SubscriptionTier::Pro => "Pro",
+            types::SubscriptionTier::Enterprise => "Enterprise",
         };
         kv.put(&user_tier_key, tier_str)?
             .expiration_ttl(3600)
@@ -109,6 +110,7 @@ pub fn check_subscription_tier_permission(
 ) -> bool {
     let user_level = match user_tier {
         types::SubscriptionTier::Free => 0,
+        types::SubscriptionTier::Paid => 1,
         types::SubscriptionTier::Basic => 1,
         types::SubscriptionTier::Premium => 2,
         types::SubscriptionTier::Enterprise => 3,

@@ -5,10 +5,11 @@ use crate::services::{
     core::analysis::market_analysis::{
         OpportunityType, RiskLevel, TimeHorizon, TradingOpportunity,
     },
+    core::infrastructure::DatabaseManager,
     core::user::user_trading_preferences::{
         ExperienceLevel, RiskTolerance, TradingFocus, UserTradingPreferences,
     },
-    D1Service, UserTradingPreferencesService,
+    UserTradingPreferencesService,
 };
 use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
@@ -253,6 +254,30 @@ pub struct UserOpportunityPreferences {
     pub updated_at: u64,
 }
 
+impl UserOpportunityPreferences {
+    /// Create default preferences for a user
+    pub fn default_for_user(user_id: String) -> Self {
+        Self {
+            user_id,
+            enabled_categories: vec![
+                OpportunityCategory::LowRiskArbitrage,
+                OpportunityCategory::HighConfidenceArbitrage,
+            ],
+            alert_configs: vec![],
+            global_alert_settings: GlobalAlertSettings::default(),
+            personalization_settings: PersonalizationSettings::default(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            updated_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        }
+    }
+}
+
 /// Global alert settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalAlertSettings {
@@ -309,7 +334,7 @@ impl Default for PersonalizationSettings {
 
 /// Main opportunity categorization service
 pub struct OpportunityCategorizationService {
-    d1_service: D1Service,
+    db_manager: DatabaseManager,
     preferences_service: UserTradingPreferencesService,
     logger: Logger,
     // Cache for user preferences to avoid repeated DB calls (using Arc<Mutex<>> for thread safety)
@@ -318,12 +343,12 @@ pub struct OpportunityCategorizationService {
 
 impl OpportunityCategorizationService {
     pub fn new(
-        d1_service: D1Service,
+        db_manager: DatabaseManager,
         preferences_service: UserTradingPreferencesService,
         logger: Logger,
     ) -> Self {
         Self {
-            d1_service,
+            db_manager,
             preferences_service,
             logger,
             user_prefs_cache: Arc::new(Mutex::new(HashMap::new())),
@@ -462,22 +487,28 @@ impl OpportunityCategorizationService {
 
         // Try to load from D1 database first
         let opportunity_prefs = match self
-            .d1_service
+            .db_manager
             .get_user_opportunity_preferences(user_id)
             .await?
         {
-            Some(prefs) => prefs,
+            Some(prefs) => {
+                // Convert serde_json::Value to UserOpportunityPreferences
+                serde_json::from_value::<UserOpportunityPreferences>(prefs).map_err(|e| {
+                    ArbitrageError::parse_error(format!("Failed to parse user preferences: {}", e))
+                })?
+            }
             None => {
-                // Create default preferences based on user's trading preferences if not found
-                let user_prefs = self
-                    .preferences_service
-                    .get_or_create_preferences(user_id)
-                    .await?;
+                // Create default preferences
                 let default_prefs =
-                    self.create_default_opportunity_preferences(user_id, &user_prefs);
+                    UserOpportunityPreferences::default_for_user(user_id.to_string());
 
-                // Store default preferences in database for future use
-                self.update_user_opportunity_preferences(&default_prefs)
+                // Store default preferences in database
+                let preferences_value = serde_json::to_value(&default_prefs).map_err(|e| {
+                    ArbitrageError::parse_error(format!("Failed to serialize preferences: {}", e))
+                })?;
+
+                self.db_manager
+                    .store_user_opportunity_preferences(&default_prefs.user_id, &preferences_value)
                     .await?;
 
                 default_prefs
@@ -545,8 +576,8 @@ impl OpportunityCategorizationService {
         &self,
         preferences: &UserOpportunityPreferences,
     ) -> ArbitrageResult<()> {
-        // Store preferences in D1 database
-        let preferences_json = serde_json::to_string(preferences).map_err(|e| {
+        // Serialize preferences to JSON
+        let preferences_value = serde_json::to_value(preferences).map_err(|e| {
             ArbitrageError::parse_error(format!(
                 "Failed to serialize opportunity preferences: {}",
                 e
@@ -554,8 +585,8 @@ impl OpportunityCategorizationService {
         })?;
 
         // Store in database using D1Service
-        self.d1_service
-            .store_user_opportunity_preferences(&preferences.user_id, &preferences_json)
+        self.db_manager
+            .store_user_opportunity_preferences(&preferences.user_id, &preferences_value)
             .await?;
 
         // Update cache with new preferences
@@ -985,97 +1016,6 @@ impl OpportunityCategorizationService {
         );
 
         metadata
-    }
-
-    /// Create default opportunity preferences for a user
-    fn create_default_opportunity_preferences(
-        &self,
-        user_id: &str,
-        user_prefs: &UserTradingPreferences,
-    ) -> UserOpportunityPreferences {
-        // Default enabled categories based on trading focus and experience
-        let enabled_categories = match (&user_prefs.trading_focus, &user_prefs.experience_level) {
-            (TradingFocus::Arbitrage, ExperienceLevel::Beginner) => vec![
-                OpportunityCategory::LowRiskArbitrage,
-                OpportunityCategory::HighConfidenceArbitrage,
-                OpportunityCategory::BeginnerFriendly,
-            ],
-            (TradingFocus::Arbitrage, _) => vec![
-                OpportunityCategory::LowRiskArbitrage,
-                OpportunityCategory::HighConfidenceArbitrage,
-                OpportunityCategory::HybridEnhanced,
-                OpportunityCategory::AiRecommended,
-            ],
-            (TradingFocus::Technical, ExperienceLevel::Beginner) => vec![
-                OpportunityCategory::BeginnerFriendly,
-                OpportunityCategory::TechnicalSignals,
-            ],
-            (TradingFocus::Technical, _) => vec![
-                OpportunityCategory::TechnicalSignals,
-                OpportunityCategory::MomentumTrading,
-                OpportunityCategory::MeanReversion,
-                OpportunityCategory::BreakoutPatterns,
-                OpportunityCategory::AiRecommended,
-            ],
-            (TradingFocus::Hybrid, _) => vec![
-                OpportunityCategory::LowRiskArbitrage,
-                OpportunityCategory::HighConfidenceArbitrage,
-                OpportunityCategory::TechnicalSignals,
-                OpportunityCategory::HybridEnhanced,
-                OpportunityCategory::AiRecommended,
-            ],
-        };
-
-        // Create default alert configs for enabled categories
-        let alert_configs: Vec<CategoryAlertConfig> = enabled_categories
-            .iter()
-            .map(|category| {
-                let mut config = CategoryAlertConfig {
-                    category: category.clone(),
-                    ..Default::default()
-                };
-
-                // Adjust thresholds based on experience level
-                match user_prefs.experience_level {
-                    ExperienceLevel::Beginner => {
-                        config.min_confidence_threshold = 0.8;
-                        config.max_risk_level = RiskLevel::Low;
-                        config.min_expected_return = 1.0;
-                    }
-                    ExperienceLevel::Intermediate => {
-                        config.min_confidence_threshold = 0.7;
-                        config.max_risk_level = RiskLevel::Medium;
-                        config.min_expected_return = 1.5;
-                    }
-                    ExperienceLevel::Advanced => {
-                        config.min_confidence_threshold = 0.6;
-                        config.max_risk_level = RiskLevel::High;
-                        config.min_expected_return = 2.0;
-                    }
-                }
-
-                config
-            })
-            .collect();
-
-        // Get current timestamp
-        #[cfg(target_arch = "wasm32")]
-        let now = js_sys::Date::now() as u64;
-        #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        UserOpportunityPreferences {
-            user_id: user_id.to_string(),
-            enabled_categories,
-            alert_configs,
-            global_alert_settings: GlobalAlertSettings::default(),
-            personalization_settings: PersonalizationSettings::default(),
-            created_at: now,
-            updated_at: now,
-        }
     }
 }
 

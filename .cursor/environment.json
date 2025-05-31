@@ -1,0 +1,5 @@
+{
+  "agentCanUpdateSnapshot": true,
+  "install": "chmod +x build.sh && ./build.sh",
+  "start": "chmod +x scripts/setup/setup-d1.sh && ./scripts/setup/setup-d1.sh && wrangler deploy"
+}

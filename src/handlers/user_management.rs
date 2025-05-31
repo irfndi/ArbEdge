@@ -26,7 +26,11 @@ pub async fn handle_api_get_user_profile(req: Request, env: Env) -> Result<Respo
 
     // Initialize services
     let kv_store = env.kv("ArbEdgeKV")?;
-    let d1_service = services::core::infrastructure::D1Service::new(&env)?;
+    let d1_database = env.d1("ArbEdgeDB")?;
+    let d1_service = services::core::infrastructure::DatabaseManager::new(
+        std::sync::Arc::new(d1_database),
+        services::core::infrastructure::database_repositories::DatabaseManagerConfig::default(),
+    );
     let user_profile_service = services::core::user::user_profile::UserProfileService::new(
         kv_store,
         d1_service,
@@ -105,7 +109,11 @@ pub async fn handle_api_update_user_profile(mut req: Request, env: Env) -> Resul
 
     // Initialize services
     let kv_store = env.kv("ArbEdgeKV")?;
-    let d1_service = services::core::infrastructure::D1Service::new(&env)?;
+    let d1_database = env.d1("ArbEdgeDB")?;
+    let d1_service = services::core::infrastructure::DatabaseManager::new(
+        std::sync::Arc::new(d1_database),
+        services::core::infrastructure::database_repositories::DatabaseManagerConfig::default(),
+    );
     let user_profile_service = services::core::user::user_profile::UserProfileService::new(
         kv_store,
         d1_service,
@@ -181,7 +189,11 @@ pub async fn handle_api_get_user_preferences(req: Request, env: Env) -> Result<R
 
     // Initialize services
     let kv_store = env.kv("ArbEdgeKV")?;
-    let d1_service = services::core::infrastructure::D1Service::new(&env)?;
+    let d1_database = env.d1("ArbEdgeDB")?;
+    let d1_service = services::core::infrastructure::DatabaseManager::new(
+        std::sync::Arc::new(d1_database),
+        services::core::infrastructure::database_repositories::DatabaseManagerConfig::default(),
+    );
     let user_profile_service = services::core::user::user_profile::UserProfileService::new(
         kv_store,
         d1_service,
@@ -194,14 +206,11 @@ pub async fn handle_api_get_user_preferences(req: Request, env: Env) -> Result<R
             let preferences = serde_json::json!({
                 "user_id": user_id,
                 "risk_tolerance_percentage": profile.configuration.risk_tolerance_percentage,
-                "trading_pairs": profile.configuration.trading_pairs,
-                "auto_trading_enabled": profile.configuration.auto_trading_enabled,
-                "max_leverage": profile.configuration.max_leverage,
+                "auto_trading_enabled": profile.configuration.trading_settings.auto_trading_enabled,
+                "max_leverage": profile.configuration.trading_settings.max_leverage,
                 "max_entry_size_usdt": profile.configuration.max_entry_size_usdt,
-                "min_entry_size_usdt": profile.configuration.min_entry_size_usdt,
-                "opportunity_threshold": profile.configuration.opportunity_threshold,
-                "notification_preferences": profile.configuration.notification_preferences,
-                "excluded_pairs": profile.configuration.excluded_pairs,
+                "preferred_exchanges": profile.configuration.preferred_exchanges,
+                "notification_preferences": profile.configuration.notification_settings,
                 "timestamp": chrono::Utc::now().timestamp()
             });
 
@@ -255,7 +264,11 @@ pub async fn handle_api_update_user_preferences(mut req: Request, env: Env) -> R
 
     // Initialize services
     let kv_store = env.kv("ArbEdgeKV")?;
-    let d1_service = services::core::infrastructure::D1Service::new(&env)?;
+    let d1_database = env.d1("ArbEdgeDB")?;
+    let d1_service = services::core::infrastructure::DatabaseManager::new(
+        std::sync::Arc::new(d1_database),
+        services::core::infrastructure::database_repositories::DatabaseManagerConfig::default(),
+    );
     let user_profile_service = services::core::user::user_profile::UserProfileService::new(
         kv_store,
         d1_service,
@@ -276,14 +289,11 @@ pub async fn handle_api_update_user_preferences(mut req: Request, env: Env) -> R
                                 "updated": true,
                                 "preferences": {
                                     "risk_tolerance_percentage": profile.configuration.risk_tolerance_percentage,
-                                    "trading_pairs": profile.configuration.trading_pairs,
-                                    "auto_trading_enabled": profile.configuration.auto_trading_enabled,
-                                    "max_leverage": profile.configuration.max_leverage,
+                                    "auto_trading_enabled": profile.configuration.trading_settings.auto_trading_enabled,
+                                    "max_leverage": profile.configuration.trading_settings.max_leverage,
                                     "max_entry_size_usdt": profile.configuration.max_entry_size_usdt,
-                                    "min_entry_size_usdt": profile.configuration.min_entry_size_usdt,
-                                    "opportunity_threshold": profile.configuration.opportunity_threshold,
-                                    "notification_preferences": profile.configuration.notification_preferences,
-                                    "excluded_pairs": profile.configuration.excluded_pairs
+                                    "preferred_exchanges": profile.configuration.preferred_exchanges,
+                                    "notification_preferences": profile.configuration.notification_settings
                                 },
                                 "timestamp": chrono::Utc::now().timestamp()
                             }));

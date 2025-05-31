@@ -1,7 +1,6 @@
 use crate::services::{
-    core::infrastructure::d1_database::D1Service,
-    core::trading::exchange::{ExchangeService, SuperAdminApiConfig},
-    core::user::user_profile::UserProfileService,
+    core::infrastructure::DatabaseManager, core::trading::exchange::SuperAdminApiConfig,
+    core::user::user_profile::UserProfileService, ExchangeService,
 };
 use crate::types::{ApiKeyProvider, ExchangeIdEnum, UserApiKey, UserProfile};
 use crate::utils::{ArbitrageError, ArbitrageResult};
@@ -61,7 +60,7 @@ pub struct ExchangeAvailabilityService {
     #[allow(dead_code)]
     exchange_service: ExchangeService,
     #[allow(dead_code)]
-    d1_service: D1Service,
+    d1_service: DatabaseManager,
     kv_store: KvStore,
     cache_ttl_seconds: u64,
 }
@@ -71,7 +70,7 @@ impl ExchangeAvailabilityService {
         super_admin_config: SuperAdminApiConfig,
         user_profile_service: UserProfileService,
         exchange_service: ExchangeService,
-        d1_service: D1Service,
+        d1_service: DatabaseManager,
         kv_store: KvStore,
     ) -> Self {
         Self {

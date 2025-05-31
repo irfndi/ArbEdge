@@ -28,21 +28,31 @@ pub mod core {
     }
 
     pub mod opportunities {
-        pub mod global_opportunity;
-        pub mod opportunity;
         pub mod opportunity_categorization;
         pub mod opportunity_distribution;
-        pub mod opportunity_enhanced;
-        pub mod technical_trading;
 
-        pub use global_opportunity::GlobalOpportunityService;
-        pub use opportunity::OpportunityService;
+        // New modular architecture
+        pub mod access_manager;
+        pub mod ai_enhancer;
+        pub mod cache_manager;
+        pub mod market_analyzer;
+        pub mod opportunity_builders;
+        pub mod opportunity_core;
+        pub mod opportunity_engine;
+
         pub use opportunity_categorization::OpportunityCategorizationService;
         pub use opportunity_distribution::{
             DistributionConfig, DistributionStats, OpportunityDistributionService,
         };
-        pub use opportunity_enhanced::EnhancedOpportunityService;
-        pub use technical_trading::TechnicalTradingService;
+
+        // Re-export new modular components
+        pub use access_manager::AccessManager;
+        pub use ai_enhancer::AIEnhancer;
+        pub use cache_manager::{CacheManager, CachePrefixes};
+        pub use market_analyzer::MarketAnalyzer;
+        pub use opportunity_builders::OpportunityBuilder;
+        pub use opportunity_core::{OpportunityConfig, OpportunityContext, OpportunityUtils};
+        pub use opportunity_engine::OpportunityEngine;
     }
 
     pub mod analysis {
@@ -76,49 +86,78 @@ pub mod core {
     }
 
     pub mod infrastructure {
-        pub mod ai_gateway;
-        pub mod analytics_engine;
-        pub mod cloudflare_pipelines;
-        pub mod cloudflare_queues;
-        pub mod d1_database;
-        pub mod durable_objects;
-        pub mod fund_monitoring;
-        pub mod hybrid_data_access;
-        pub mod kv_service;
-        pub mod monitoring_observability;
-        pub mod notifications;
-        pub mod service_container;
-        pub mod vectorize_service;
+        // Legacy files - REMOVED (replaced by modular architecture)
+        // pub mod ai_gateway; -> replaced by ai_services module
+        // pub mod cloudflare_pipelines; -> replaced by data_ingestion_module
+        // pub mod cloudflare_queues; -> replaced by data_ingestion_module
+        // pub mod d1_database; -> replaced by database_repositories module
+        // pub mod hybrid_data_access; -> replaced by data_access_layer module
+        // pub mod kv_service; -> replaced by data_access_layer module
+        // pub mod monitoring_observability; -> replaced by monitoring_module
+        // pub mod notifications; -> replaced by notification_module
+        // pub mod vectorize_service; -> replaced by ai_services module
 
-        pub use ai_gateway::{
-            AIGatewayConfig, AIGatewayService, AIModelConfig, AIRequest, AIResponse,
-            ModelRequirements, RoutingDecision,
+        // New Modular Infrastructure Architecture (7 Modules + 1 Legacy)
+        pub mod ai_services;
+        pub mod analytics_module;
+        pub mod data_access_layer;
+        pub mod data_ingestion_module;
+        pub mod database_repositories;
+        pub mod financial_module;
+        pub mod monitoring_module;
+        pub mod notification_module;
+
+        // Legacy files still in use
+        pub mod analytics_engine;
+        pub mod durable_objects;
+        pub mod service_container;
+
+        // Re-export new modular components
+        pub use ai_services::{
+            AICache, AICoordinator, AIServicesConfig, AIServicesHealth, AIServicesMetrics,
+            EmbeddingEngine, ModelRouter, PersonalizationEngine,
         };
+        pub use analytics_module::{
+            AnalyticsCoordinator, AnalyticsModule, AnalyticsModuleConfig, AnalyticsModuleHealth,
+            AnalyticsModuleMetrics, DataProcessor, MetricsAggregator, ReportGenerator,
+        };
+        pub use data_access_layer::{
+            APIConnector, CacheLayer, DataAccessLayer, DataAccessLayerConfig,
+            DataAccessLayerHealth, DataCoordinator, DataSourceManager, DataValidator,
+        };
+        pub use data_ingestion_module::{
+            DataIngestionModule, DataIngestionModuleConfig, DataTransformer, IngestionCoordinator,
+            PipelineManager, QueueManager,
+        };
+        pub use database_repositories::{
+            AIDataRepository, AnalyticsRepository, ConfigRepository, DatabaseManager,
+            InvitationRepository, UserRepository,
+        };
+        pub use financial_module::{
+            BalanceTracker, ExchangeBalanceSnapshot, FinancialCoordinator, FinancialModule,
+            FinancialModuleConfig, FinancialModuleHealth, FinancialModuleMetrics, FundAnalyzer,
+            FundOptimizationResult, PortfolioAnalytics,
+        };
+        pub use monitoring_module::{
+            AlertManager, HealthMonitor, MetricsCollector, MonitoringModule,
+            MonitoringModuleConfig, MonitoringModuleHealth, MonitoringModuleMetrics,
+            ObservabilityCoordinator, TraceCollector,
+        };
+        pub use notification_module::{
+            ChannelManager, DeliveryManager, NotificationCoordinator, NotificationModule,
+            NotificationModuleConfig, NotificationModuleHealth, NotificationModuleMetrics,
+            TemplateEngine,
+        };
+
+        // Legacy exports (still in use)
         pub use analytics_engine::{
             AnalyticsEngineConfig, AnalyticsEngineService, RealTimeMetrics, UserAnalytics,
         };
-        pub use cloudflare_pipelines::CloudflarePipelinesService;
-        pub use cloudflare_queues::{
-            CloudflareQueuesConfig, CloudflareQueuesService, DistributionStrategy, MessagePriority,
-        };
-        pub use d1_database::D1Service;
         pub use durable_objects::{
             GlobalRateLimiterDO, MarketDataCoordinatorDO, OpportunityCoordinatorDO,
             UserOpportunityQueueDO,
         };
-        pub use fund_monitoring::FundMonitoringService;
-        pub use hybrid_data_access::{
-            HybridDataAccessConfig, HybridDataAccessService, MarketDataSnapshot,
-            SuperAdminApiConfig,
-        };
-        pub use kv_service::KVService;
-        pub use monitoring_observability::MonitoringObservabilityService;
-        pub use notifications::NotificationService;
         pub use service_container::{ServiceContainer, ServiceHealthStatus};
-        pub use vectorize_service::{
-            OpportunityEmbedding, RankedOpportunity, SimilarityResult, UserPreferenceVector,
-            VectorizeConfig, VectorizeService,
-        };
     }
 }
 
@@ -154,16 +193,36 @@ pub use core::analysis::{
     CorrelationAnalysisService, MarketAnalysisService, TechnicalAnalysisService,
 };
 pub use core::infrastructure::{
-    AIGatewayService, AnalyticsEngineService, CloudflarePipelinesService, CloudflareQueuesService,
-    D1Service, DistributionStrategy, FundMonitoringService, GlobalRateLimiterDO,
-    HybridDataAccessService, KVService, MarketDataCoordinatorDO, MessagePriority,
-    MonitoringObservabilityService, NotificationService, OpportunityCoordinatorDO,
-    ServiceContainer, UserOpportunityQueueDO, VectorizeService,
+    // Legacy services still in use
+    AnalyticsEngineService,
+    AnalyticsModule,
+    DataAccessLayer,
+    DataIngestionModule,
+    DatabaseManager,
+    FinancialModule,
+
+    GlobalRateLimiterDO,
+    MarketDataCoordinatorDO,
+    MonitoringModule,
+    // New modular infrastructure components
+    NotificationModule,
+    OpportunityCoordinatorDO,
+    ServiceContainer,
+    UserOpportunityQueueDO,
 };
 pub use core::invitation::{AffiliationService, InvitationService, ReferralService};
 pub use core::opportunities::{
-    EnhancedOpportunityService, GlobalOpportunityService, OpportunityCategorizationService,
-    OpportunityDistributionService, OpportunityService, TechnicalTradingService,
+    AIEnhancer,
+    AccessManager,
+    CacheManager,
+    MarketAnalyzer,
+    OpportunityBuilder,
+    OpportunityCategorizationService,
+    OpportunityConfig,
+    OpportunityContext,
+    OpportunityDistributionService,
+    // New modular components
+    OpportunityEngine,
 };
 pub use core::trading::{
     AiExchangeRouterService, ExchangeAvailabilityService, ExchangeService, PositionsService,

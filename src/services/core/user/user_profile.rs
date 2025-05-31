@@ -1,20 +1,34 @@
 // src/services/user_profile.rs
 
-use crate::services::D1Service;
-use crate::types::{ExchangeIdEnum, InvitationCode, UserApiKey, UserProfile, UserSession};
+use crate::services::core::infrastructure::DatabaseManager;
+use crate::types::{
+    /* ApiKeyProvider, */ ExchangeIdEnum, InvitationCode, UserApiKey, UserProfile, UserSession,
+};
 use crate::utils::{ArbitrageError, ArbitrageResult};
-use worker::console_log;
-use worker::kv::KvStore;
-// use std::collections::HashMap; // TODO: Re-enable when implementing HashMap functionality
+use worker::{console_log, kv::KvStore};
+// use crate::services::core::infrastructure::data_access_layer::DataAccessLayer;
+// use crate::services::core::infrastructure::database_repositories::user_repository::UserRepository;
+// use crate::services::core::infrastructure::database_repositories::DatabaseRepositoryProvider;
+// use crate::services::core::user::session_management::SessionManagementService;
+// use crate::services::core::user::user_activity::UserActivityService;
+// use std::sync::Arc;
+
+/// Trait for user profile data access
+#[allow(async_fn_in_trait)]
+pub trait UserProfileProvider: Send + Sync {
+    async fn get_user_profile(&self, user_id: &str) -> ArbitrageResult<UserProfile>;
+    async fn create_user_profile(&self, profile: &UserProfile) -> ArbitrageResult<()>;
+    async fn update_user_profile(&self, profile: &UserProfile) -> ArbitrageResult<()>;
+}
 
 pub struct UserProfileService {
     kv_store: KvStore,
-    d1_service: D1Service,
+    d1_service: DatabaseManager,
     encryption_key: String, // For encrypting API keys
 }
 
 impl UserProfileService {
-    pub fn new(kv_store: KvStore, d1_service: D1Service, encryption_key: String) -> Self {
+    pub fn new(kv_store: KvStore, d1_service: DatabaseManager, encryption_key: String) -> Self {
         Self {
             kv_store,
             d1_service,
@@ -103,8 +117,12 @@ impl UserProfileService {
         updated_profile.updated_at = chrono::Utc::now().timestamp_millis() as u64;
 
         // Update in D1 (persistent storage)
+        let profile_data = serde_json::to_value(&updated_profile).map_err(|e| {
+            ArbitrageError::parse_error(format!("Failed to serialize profile: {}", e))
+        })?;
+
         self.d1_service
-            .update_user_profile(&updated_profile)
+            .update_user_profile(&updated_profile.user_id, &profile_data)
             .await?;
 
         // Invalidate cache
@@ -142,16 +160,14 @@ impl UserProfileService {
             user_id.to_string(),
             exchange,
             api_key_encrypted,
-            secret_encrypted,
-            permissions,
+            Some(secret_encrypted),
+            false, // is_testnet
         );
 
-        // Store API key metadata in D1
-        self.d1_service
-            .store_user_api_key(user_id, &user_api_key)
-            .await?;
+        // Set the permissions after creation
+        let mut user_api_key = user_api_key;
+        user_api_key.permissions = permissions;
 
-        // Update profile with new API key
         profile.add_api_key(user_api_key);
         self.update_user_profile(&profile).await?;
 
@@ -182,7 +198,21 @@ impl UserProfileService {
             .await?
             .ok_or_else(|| ArbitrageError::not_found("User profile not found"))?;
 
-        Ok(profile.api_keys.clone())
+        Ok(profile.api_keys)
+    }
+
+    /// Get user preferences
+    pub async fn get_user_preferences(
+        &self,
+        user_id: &str,
+    ) -> ArbitrageResult<crate::types::UserPreferences> {
+        let profile = self
+            .get_user_profile(user_id)
+            .await?
+            .ok_or_else(|| ArbitrageError::not_found("User profile not found"))?;
+
+        // Return preferences directly from the user profile
+        Ok(profile.preferences)
     }
 
     pub async fn decrypt_user_api_key(
@@ -224,7 +254,27 @@ impl UserProfileService {
             }
         }
 
-        self.d1_service.execute(query, params).await
+        let params: Vec<worker::wasm_bindgen::JsValue> = params
+            .iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => worker::wasm_bindgen::JsValue::from(s.as_str()),
+                serde_json::Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        worker::wasm_bindgen::JsValue::from(i as f64)
+                    } else if let Some(f) = n.as_f64() {
+                        worker::wasm_bindgen::JsValue::from(f)
+                    } else {
+                        worker::wasm_bindgen::JsValue::from(0.0)
+                    }
+                }
+                serde_json::Value::Bool(b) => worker::wasm_bindgen::JsValue::from(*b),
+                serde_json::Value::Null => worker::wasm_bindgen::JsValue::NULL,
+                _ => worker::wasm_bindgen::JsValue::from(v.to_string().as_str()),
+            })
+            .collect();
+
+        self.d1_service.execute(query, &params).await?;
+        Ok(())
     }
 
     /// Execute a write operation (INSERT, UPDATE, DELETE) on the D1 database
@@ -260,81 +310,79 @@ impl UserProfileService {
             }
         }
 
-        self.d1_service.execute(query, params).await
+        let params: Vec<worker::wasm_bindgen::JsValue> = params
+            .iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => worker::wasm_bindgen::JsValue::from(s.as_str()),
+                serde_json::Value::Number(n) => {
+                    if let Some(i) = n.as_i64() {
+                        worker::wasm_bindgen::JsValue::from(i as f64)
+                    } else if let Some(f) = n.as_f64() {
+                        worker::wasm_bindgen::JsValue::from(f)
+                    } else {
+                        worker::wasm_bindgen::JsValue::from(0.0)
+                    }
+                }
+                serde_json::Value::Bool(b) => worker::wasm_bindgen::JsValue::from(*b),
+                serde_json::Value::Null => worker::wasm_bindgen::JsValue::NULL,
+                _ => worker::wasm_bindgen::JsValue::from(v.to_string().as_str()),
+            })
+            .collect();
+
+        self.d1_service.execute(query, &params).await?;
+        Ok(())
     }
 
     // Session Management (KV only for fast access)
     pub async fn store_user_session(&self, session: &UserSession) -> ArbitrageResult<()> {
-        let key = format!("user_session:{}", session.telegram_chat_id);
-        let value = serde_json::to_string(session).map_err(|e| {
-            ArbitrageError::parse_error(format!("Failed to serialize user session: {}", e))
-        })?;
+        let key = format!("user_session:{}", session.user_id);
+        let session_data = serde_json::to_string(session)?;
 
         self.kv_store
-            .put(&key, value)
-            .map_err(|e| {
-                ArbitrageError::database_error(format!("Failed to store user session: {}", e))
-            })?
+            .put(&key, session_data)?
+            .expiration_ttl(session.expires_at - chrono::Utc::now().timestamp_millis() as u64)
             .execute()
-            .await
-            .map_err(|e| {
-                ArbitrageError::database_error(format!("Failed to execute session put: {}", e))
-            })?;
+            .await?;
 
         Ok(())
     }
 
-    pub async fn get_user_session(
-        &self,
-        telegram_chat_id: i64,
-    ) -> ArbitrageResult<Option<UserSession>> {
-        let key = format!("user_session:{}", telegram_chat_id);
+    pub async fn get_user_session(&self, user_id: &str) -> ArbitrageResult<Option<UserSession>> {
+        let key = format!("user_session:{}", user_id);
 
-        match self.kv_store.get(&key).text().await {
-            Ok(Some(value)) => {
-                let session: UserSession = serde_json::from_str(&value).map_err(|e| {
-                    ArbitrageError::parse_error(format!(
-                        "Failed to deserialize user session: {}",
-                        e
-                    ))
-                })?;
-
-                // Check if session is expired
-                if session.is_expired() {
-                    self.delete_user_session(telegram_chat_id).await?;
-                    Ok(None)
-                } else {
-                    Ok(Some(session))
-                }
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(ArbitrageError::database_error(format!(
-                "Failed to get user session: {}",
-                e
-            ))),
+        if let Some(session_data) = self.kv_store.get(&key).text().await? {
+            let session: UserSession = serde_json::from_str(&session_data)?;
+            Ok(Some(session))
+        } else {
+            Ok(None)
         }
     }
 
-    pub async fn delete_user_session(&self, telegram_chat_id: i64) -> ArbitrageResult<()> {
-        let key = format!("user_session:{}", telegram_chat_id);
-
-        self.kv_store.delete(&key).await.map_err(|e| {
-            ArbitrageError::database_error(format!("Failed to delete user session: {}", e))
-        })?;
-
-        Ok(())
+    pub async fn validate_user_session(&self, user_id: &str) -> ArbitrageResult<bool> {
+        if let Some(session) = self.get_user_session(user_id).await? {
+            if !session.is_expired() {
+                return Ok(true);
+            } else {
+                // Clean up expired session
+                let key = format!("user_session:{}", user_id);
+                self.kv_store.delete(&key).await?;
+            }
+        }
+        Ok(false)
     }
 
     // Invitation Code Management (D1 for persistence, KV for validation cache)
     pub async fn create_invitation_code(
         &self,
+        created_by: Option<String>,
         purpose: String,
         max_uses: Option<u32>,
         expires_in_days: Option<u32>,
-        created_by: Option<String>,
     ) -> ArbitrageResult<InvitationCode> {
-        let mut invitation = InvitationCode::new(purpose, max_uses, expires_in_days);
-        invitation.created_by = created_by;
+        let created_by_user_id = created_by.clone().unwrap_or_else(|| "system".to_string());
+        let mut invitation =
+            InvitationCode::new(purpose, max_uses, expires_in_days, created_by_user_id);
+        invitation.created_by = created_by.unwrap_or_else(|| "system".to_string());
 
         // Store in D1 (persistent storage)
         self.d1_service.create_invitation_code(&invitation).await?;
@@ -507,6 +555,37 @@ impl UserProfileService {
     }
 }
 
+impl UserProfileProvider for UserProfileService {
+    async fn get_user_profile(&self, user_id: &str) -> ArbitrageResult<UserProfile> {
+        self.get_user_profile(user_id).await?.ok_or_else(|| {
+            ArbitrageError::not_found(format!("User profile not found for user_id: {}", user_id))
+        })
+    }
+
+    async fn create_user_profile(&self, profile: &UserProfile) -> ArbitrageResult<()> {
+        // This service's create_user_profile has a different signature.
+        // Adapting by assuming telegram_user_id can be extracted or is primary.
+        // This might need further refinement based on how AuthService intends to use it.
+        if profile.telegram_user_id.is_none() {
+            return Err(ArbitrageError::validation_error(
+                "Telegram user ID is required to create a profile via this provider method.",
+            ));
+        }
+        let _created_profile = self
+            .create_user_profile(
+                profile.telegram_user_id.unwrap(),
+                profile.invitation_code.clone(),
+                profile.telegram_username.clone(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn update_user_profile(&self, profile: &UserProfile) -> ArbitrageResult<()> {
+        self.update_user_profile(profile).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,7 +620,8 @@ mod tests {
             ExchangeIdEnum::Binance,
             "encrypted_key".to_string(),
             "encrypted_secret".to_string(),
-            vec!["read".to_string(), "trade".to_string()],
+            None,  // passphrase
+            false, // is_testnet
         );
 
         // Test adding first API key
@@ -555,7 +635,8 @@ mod tests {
             ExchangeIdEnum::Bybit,
             "encrypted_key2".to_string(),
             "encrypted_secret2".to_string(),
-            vec!["read".to_string(), "trade".to_string()],
+            None,  // passphrase
+            false, // is_testnet
         );
 
         profile.add_api_key(api_key2);
@@ -598,13 +679,11 @@ mod tests {
         assert!(invitation.can_be_used());
 
         // Use the code
-        let used = invitation.use_code();
-        assert!(used);
+        invitation.use_code();
         assert_eq!(invitation.current_uses, 1);
 
-        // Should not be usable after reaching max uses
-        assert!(!invitation.can_be_used());
-        let used_again = invitation.use_code();
+        // Test that the same code can't be used again
+        let used_again = invitation.can_be_used();
         assert!(!used_again);
     }
 
@@ -612,13 +691,13 @@ mod tests {
     async fn test_user_session_creation() {
         // Test user session creation logic
         let user_id = "test_user_123".to_string();
-        let telegram_chat_id = 987654321i64;
+        let telegram_chat_id = Some(987654321i64);
 
-        let session = UserSession::new(user_id.clone(), telegram_chat_id);
+        let session = UserSession::new(user_id.clone(), telegram_chat_id.unwrap());
 
         assert_eq!(session.user_id, user_id);
         assert_eq!(session.telegram_chat_id, telegram_chat_id);
-        assert_eq!(session.current_state, crate::types::SessionState::Idle);
+        assert!(session.is_active);
         assert!(!session.is_expired());
     }
 

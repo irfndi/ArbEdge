@@ -145,11 +145,12 @@ pub fn generate_uuid() -> String {
 
 /// Generate a new API key (32 character random string)
 pub fn generate_api_key() -> String {
+    use rand::rngs::OsRng;
     use rand::Rng;
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
                             abcdefghijklmnopqrstuvwxyz\
                             0123456789";
-    let mut rng = rand::thread_rng();
+    let mut rng = OsRng;
 
     (0..32)
         .map(|_| {
@@ -161,11 +162,12 @@ pub fn generate_api_key() -> String {
 
 /// Generate a new secret key (64 character random string)
 pub fn generate_secret_key() -> String {
+    use rand::rngs::OsRng;
     use rand::Rng;
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
                             abcdefghijklmnopqrstuvwxyz\
                             0123456789";
-    let mut rng = rand::thread_rng();
+    let mut rng = OsRng;
 
     (0..64)
         .map(|_| {
@@ -280,5 +282,100 @@ mod tests {
         assert_eq!(result[2], 2.0); // [1,2,3] avg = 2
         assert_eq!(result[3], 3.0); // [2,3,4] avg = 3
         assert_eq!(result[4], 4.0); // [3,4,5] avg = 4
+    }
+
+    #[test]
+    fn test_validate_api_key_valid_keys() {
+        // Test valid keys of different lengths
+        assert!(validate_api_key("abcdef1234567890")); // 16 chars (minimum)
+        assert!(validate_api_key("ABCDEFabcdef1234567890123456")); // 26 chars
+        assert!(validate_api_key("a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6A7B8C9D0E1F2G3H4I5J6K7L8M9N0O1P2Q3R4S5T6U7V8W9X0Y1Z2")); // 128 chars (maximum)
+
+        // Test mixed alphanumeric
+        assert!(validate_api_key("ABC123def456GHI789"));
+        assert!(validate_api_key("1234567890abcdef"));
+        assert!(validate_api_key("ABCDEFGHIJKLMNOP"));
+    }
+
+    #[test]
+    fn test_validate_api_key_invalid_characters() {
+        // Test keys with invalid characters
+        assert!(!validate_api_key("abc-def-123")); // Contains hyphens
+        assert!(!validate_api_key("abc_def_123")); // Contains underscores
+        assert!(!validate_api_key("abc def 123")); // Contains spaces
+        assert!(!validate_api_key("abc@def#123")); // Contains special characters
+        assert!(!validate_api_key("abc.def.123")); // Contains dots
+        assert!(!validate_api_key("abc+def=123")); // Contains plus and equals
+        assert!(!validate_api_key("abc/def\\123")); // Contains slashes
+        assert!(!validate_api_key("abc!def?123")); // Contains punctuation
+    }
+
+    #[test]
+    fn test_validate_api_key_empty_and_boundary_cases() {
+        // Test empty string
+        assert!(!validate_api_key(""));
+
+        // Test too short (less than 16 characters)
+        assert!(!validate_api_key("a")); // 1 char
+        assert!(!validate_api_key("abc123")); // 6 chars
+        assert!(!validate_api_key("abcdef123456789")); // 15 chars (just under minimum)
+
+        // Test too long (more than 128 characters)
+        let too_long = "a".repeat(129);
+        assert!(!validate_api_key(&too_long));
+
+        let way_too_long = "a".repeat(256);
+        assert!(!validate_api_key(&way_too_long));
+    }
+
+    #[test]
+    fn test_validate_api_key_boundary_lengths() {
+        // Test exact boundary lengths
+        let min_length = "a".repeat(16); // Exactly 16 chars
+        assert!(validate_api_key(&min_length));
+
+        let max_length = "a".repeat(128); // Exactly 128 chars
+        assert!(validate_api_key(&max_length));
+
+        // Test just outside boundaries
+        let under_min = "a".repeat(15); // 15 chars
+        assert!(!validate_api_key(&under_min));
+
+        let over_max = "a".repeat(129); // 129 chars
+        assert!(!validate_api_key(&over_max));
+    }
+
+    #[test]
+    fn test_validate_api_key_security_properties() {
+        // Test that function maintains security properties
+
+        // Should reject common weak patterns
+        assert!(!validate_api_key("1111111111111111")); // All same digit (but still valid format)
+                                                        // Note: The function only validates format, not strength
+
+        // Should accept properly formatted keys regardless of content
+        assert!(validate_api_key("0000000000000000")); // All zeros but valid format
+        assert!(validate_api_key("aaaaaaaaaaaaaaaa")); // All same letter but valid format
+
+        // Test with realistic API key formats
+        assert!(validate_api_key("sk1234567890abcdef1234567890abcd")); // 32 chars
+        assert!(validate_api_key(
+            "pk1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd"
+        )); // 64 chars
+    }
+
+    #[test]
+    fn test_validate_api_key_unicode_and_edge_cases() {
+        // Test Unicode characters (should be rejected)
+        assert!(!validate_api_key("abc123αβγ456")); // Greek letters
+        assert!(!validate_api_key("abc123中文456")); // Chinese characters
+        assert!(!validate_api_key("abc123🔑456")); // Emoji
+
+        // Test whitespace variations
+        assert!(!validate_api_key(" abcdef1234567890")); // Leading space
+        assert!(!validate_api_key("abcdef1234567890 ")); // Trailing space
+        assert!(!validate_api_key("abcd ef1234567890")); // Internal space
+        assert!(!validate_api_key("\tabcdef1234567890")); // Tab character
+        assert!(!validate_api_key("abcdef1234567890\n")); // Newline character
     }
 }

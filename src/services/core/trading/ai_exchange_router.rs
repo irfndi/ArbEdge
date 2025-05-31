@@ -1,10 +1,19 @@
 // use worker::{Request, Response, Env}; // TODO: Re-enable when implementing worker integration [Tracked: PR-24, Comment 94]
 use crate::{
     services::{
-        core::ai::ai_integration::{AiAnalysisRequest, AiAnalysisResponse, AiProvider},
-        AiIntegrationService, D1Service, UserProfileService,
+        core::{
+            ai::ai_integration::{
+                AiAnalysisRequest, AiAnalysisResponse, AiIntegrationService, AiProvider,
+            },
+            infrastructure::{
+                database_repositories::DatabaseManager, /* service_container::ServiceContainer, */
+            },
+            /* trading::exchange::ExchangeService, */
+            user::user_profile::UserProfileService,
+        },
+        /* interfaces::telegram::TelegramService, */
     },
-    types::{ArbitrageOpportunity, GlobalOpportunity, UserProfile},
+    types::{ArbitrageOpportunity, /* ExchangeIdEnum, */ GlobalOpportunity, UserProfile},
     utils::{ArbitrageError, ArbitrageResult},
 };
 use reqwest::Client;
@@ -99,7 +108,7 @@ pub struct AiExchangeRouterService {
     config: AiExchangeRouterConfig,
     ai_service: AiIntegrationService,
     user_service: UserProfileService,
-    d1_service: D1Service,
+    d1_service: DatabaseManager,
     kv_store: KvStore,
     _http_client: Client,
 }
@@ -110,7 +119,7 @@ impl AiExchangeRouterService {
         config: AiExchangeRouterConfig,
         ai_service: AiIntegrationService,
         user_service: UserProfileService,
-        d1_service: D1Service,
+        d1_service: DatabaseManager,
         kv_store: KvStore,
     ) -> Self {
         Self {
@@ -428,7 +437,6 @@ impl AiExchangeRouterService {
             AiProvider::Custom { .. } => "Custom",
         };
 
-        // Convert request and response to JSON for audit storage
         let request_data = serde_json::to_value(request).map_err(|e| {
             ArbitrageError::parse_error(format!("Failed to serialize request: {}", e))
         })?;
@@ -439,14 +447,23 @@ impl AiExchangeRouterService {
 
         let processing_time_ms = start_time.elapsed().as_millis() as u64;
 
+        // Combine request and response data for audit
+        let audit_data = serde_json::json!({
+            "request": request_data,
+            "response": response_data,
+            "processing_time_ms": processing_time_ms,
+            "provider": provider_name
+        });
+
+        let confidence_score = response.confidence.unwrap_or(0.5);
+
         // Store audit trail in D1 database
         self.d1_service
             .store_ai_analysis_audit(
                 user_id,
-                provider_name,
-                &request_data,
-                &response_data,
-                processing_time_ms,
+                "ai_exchange_analysis",
+                &audit_data,
+                confidence_score.into(),
             )
             .await?;
 
@@ -521,7 +538,7 @@ impl AiExchangeRouterService {
             "total_pnl": user_profile.total_pnl_usdt,
             "risk_tolerance": user_profile.configuration.risk_tolerance_percentage,
             "max_position_size": user_profile.configuration.max_entry_size_usdt,
-            "min_position_size": user_profile.configuration.min_entry_size_usdt,
+            "min_position_size": user_profile.configuration.max_entry_size_usdt * 0.1, // 10% of max as min
         }))
     }
 
@@ -536,8 +553,13 @@ impl AiExchangeRouterService {
             "Analyze this specific arbitrage opportunity: {:?} with {:.2}% rate difference. \
              Consider user's risk tolerance ({:.2}%) and max position size (${:.2}). \
              Provide viability score (0-100), risk factors, and recommended position size.",
-            opportunity.source,
-            opportunity.opportunity.rate_difference * 100.0,
+            opportunity.opportunity_data,
+            if let crate::types::OpportunityData::Arbitrage(arb_opp) = &opportunity.opportunity_data
+            {
+                arb_opp.rate_difference * 100.0
+            } else {
+                0.0
+            },
             user_profile.configuration.risk_tolerance_percentage,
             user_profile.configuration.max_entry_size_usdt
         );
@@ -568,7 +590,10 @@ impl AiExchangeRouterService {
         let confidence = ai_response.confidence.unwrap_or(0.5) as f64;
 
         Ok(AiOpportunityAnalysis {
-            opportunity_id: opportunity.opportunity.id.clone(),
+            opportunity_id: match &opportunity.opportunity_data {
+                crate::types::OpportunityData::Arbitrage(arb) => arb.id.clone(),
+                crate::types::OpportunityData::Technical(tech) => tech.id.clone(),
+            },
             user_id: user_id.to_string(),
             ai_score,
             viability_assessment: ai_response.analysis.clone(),
@@ -660,8 +685,15 @@ impl AiExchangeRouterService {
         &self,
         analysis: &AiOpportunityAnalysis,
     ) -> ArbitrageResult<()> {
+        // Convert analysis to serde_json::Value for database storage
+        let analysis_value = serde_json::to_value(analysis).map_err(|e| {
+            ArbitrageError::parse_error(format!("Failed to serialize analysis: {}", e))
+        })?;
+
         // Store opportunity analysis in D1 database
-        self.d1_service.store_opportunity_analysis(analysis).await?;
+        self.d1_service
+            .store_opportunity_analysis(&analysis_value)
+            .await?;
 
         console_log!(
             "AI Opportunity Analysis stored: opportunity_id={}, user_id={}, score={:.2}",
@@ -735,8 +767,9 @@ mod tests {
 
     fn create_test_market_data() -> MarketDataSnapshot {
         use crate::types::{
-            ArbitrageOpportunity, ArbitrageType, DistributionStrategy, ExchangeIdEnum,
-            GlobalOpportunity, OpportunitySource,
+            ArbitrageOpportunity, // ArbitrageType, DistributionStrategy, ExchangeIdEnum,
+            GlobalOpportunity,
+            OpportunitySource,
         };
 
         let mut exchange_data = HashMap::new();
@@ -759,38 +792,46 @@ mod tests {
             },
         );
 
-        // Create a test opportunity to ensure the list is not empty
+        // Create ArbitrageOpportunity for testing
         let arbitrage_opp = ArbitrageOpportunity::new(
             "BTCUSDT".to_string(),
             ExchangeIdEnum::Binance,
             ExchangeIdEnum::Bybit,
-            Some(0.0001),
-            Some(0.0008),
-            0.0007,
-            ArbitrageType::FundingRate,
+            0.0001, // rate_difference as f64
+            0.0008, // volume as f64
+            0.0007, // confidence as f64
         );
 
-        let global_opportunity = GlobalOpportunity {
+        // Create GlobalOpportunity from arbitrage opportunity
+        let global_opp = GlobalOpportunity {
             id: uuid::Uuid::new_v4().to_string(),
-            opportunity_type: "arbitrage".to_string(),
-            opportunity: arbitrage_opp.clone().unwrap_or_else(|_| ArbitrageOpportunity::default()),
-            arbitrage_opportunity: Some(arbitrage_opp.unwrap_or_else(|_| ArbitrageOpportunity::default())),
-            technical_opportunity: None,
-            source: OpportunitySource::SystemGenerated,
-            created_at: chrono::Utc::now().timestamp() as u64,
-            detection_timestamp: chrono::Utc::now().timestamp() as u64,
-            expires_at: Some(chrono::Utc::now().timestamp() as u64 + 3600),
-            expiry_timestamp: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+            opportunity_type: OpportunitySource::SystemGenerated,
+            arbitrage_opportunity: arbitrage_opp.clone(),
             priority: 8,
+            target_users: vec!["user1".to_string()],
+            distribution_strategy: DistributionStrategy::FirstComeFirstServe,
+            created_at: chrono::Utc::now().timestamp() as u64,
+            expires_at: chrono::Utc::now().timestamp() as u64 + 3600,
+            opportunity_data: OpportunityData::Arbitrage(arbitrage_opp),
+            source: OpportunitySource::SystemGenerated,
+            detection_timestamp: chrono::Utc::now().timestamp() as u64,
             priority_score: 8.5,
             ai_enhanced: false,
             ai_confidence_score: None,
             ai_insights: None,
             distributed_to: vec!["user1".to_string()],
             max_participants: Some(10),
-            current_participants: 1,
-            distribution_strategy: DistributionStrategy::FirstComeFirstServe,
+            current_participants: 3,
         };
+
+        // Set AI enhancement
+        let mut enhanced_global_opp = global_opp;
+        enhanced_global_opp.ai_enhanced = true;
+        enhanced_global_opp.ai_confidence_score = Some(0.0007);
+        enhanced_global_opp.ai_insights =
+            Some(vec!["High potential with moderate risk".to_string()]);
+
+        let global_opportunity = enhanced_global_opp;
 
         MarketDataSnapshot {
             timestamp: chrono::Utc::now().timestamp() as u64,
@@ -1154,7 +1195,7 @@ mod tests {
 
         fn create_test_global_opportunity() -> GlobalOpportunity {
             use crate::types::{
-                ArbitrageOpportunity, ArbitrageType, DistributionStrategy, ExchangeIdEnum,
+                ArbitrageOpportunity, // ArbitrageType, DistributionStrategy, ExchangeIdEnum,
                 OpportunitySource,
             };
 
@@ -1162,24 +1203,23 @@ mod tests {
                 "BTCUSDT".to_string(),
                 ExchangeIdEnum::Binance,
                 ExchangeIdEnum::Bybit,
-                Some(0.0001),
-                Some(0.0008),
-                0.0007,
-                ArbitrageType::FundingRate,
+                0.0001, // rate_difference as f64
+                0.0008, // volume as f64
+                0.0007, // confidence as f64
             );
 
             GlobalOpportunity {
                 id: uuid::Uuid::new_v4().to_string(),
-                opportunity_type: "arbitrage".to_string(),
-                opportunity: arbitrage_opp.unwrap_or_else(|_| ArbitrageOpportunity::default()),
-                arbitrage_opportunity: Some(arbitrage_opp.unwrap_or_else(|_| ArbitrageOpportunity::default())),
-                technical_opportunity: None,
-                source: OpportunitySource::SystemGenerated,
-                created_at: chrono::Utc::now().timestamp() as u64,
-                detection_timestamp: chrono::Utc::now().timestamp() as u64,
-                expires_at: Some(chrono::Utc::now().timestamp() as u64 + 3600),
-                expiry_timestamp: Some(chrono::Utc::now().timestamp() as u64 + 3600),
+                opportunity_type: OpportunitySource::SystemGenerated,
+                arbitrage_opportunity: arbitrage_opp.clone(),
                 priority: 8,
+                target_users: vec!["user1".to_string()],
+                distribution_strategy: DistributionStrategy::FirstComeFirstServe,
+                created_at: chrono::Utc::now().timestamp() as u64,
+                expires_at: chrono::Utc::now().timestamp() as u64 + 3600,
+                opportunity_data: OpportunityData::Arbitrage(arbitrage_opp),
+                source: OpportunitySource::SystemGenerated,
+                detection_timestamp: chrono::Utc::now().timestamp() as u64,
                 priority_score: 8.5,
                 ai_enhanced: false,
                 ai_confidence_score: None,
@@ -1187,7 +1227,6 @@ mod tests {
                 distributed_to: vec!["user1".to_string()],
                 max_participants: Some(10),
                 current_participants: 3,
-                distribution_strategy: DistributionStrategy::FirstComeFirstServe,
             }
         }
 
@@ -1266,7 +1305,10 @@ mod tests {
 
             // Test AI opportunity analysis structure
             let analysis = AiOpportunityAnalysis {
-                opportunity_id: opportunity.opportunity.id.clone(),
+                opportunity_id: match &opportunity.opportunity_data {
+                    crate::types::OpportunityData::Arbitrage(arb) => arb.id.clone(),
+                    crate::types::OpportunityData::Technical(tech) => tech.id.clone(),
+                },
                 user_id: user_id.to_string(),
                 ai_score: 7.5,
                 viability_assessment: "High potential with moderate risk".to_string(),
@@ -1282,7 +1324,13 @@ mod tests {
             };
 
             // Verify analysis structure
-            assert_eq!(analysis.opportunity_id, opportunity.opportunity.id);
+            assert_eq!(
+                analysis.opportunity_id,
+                match &opportunity.opportunity_data {
+                    crate::types::OpportunityData::Arbitrage(arb) => arb.id.clone(),
+                    crate::types::OpportunityData::Technical(tech) => tech.id.clone(),
+                }
+            );
             assert_eq!(analysis.user_id, user_id);
             assert!(analysis.ai_score >= 0.0 && analysis.ai_score <= 10.0);
             assert!(analysis.confidence_level >= 0.0 && analysis.confidence_level <= 1.0);

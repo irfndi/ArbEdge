@@ -40,6 +40,7 @@ pub enum ErrorKind {
     Serialization,
     Internal,
     Storage,
+    AccessDenied,
 }
 
 impl fmt::Display for ArbitrageError {
@@ -190,6 +191,12 @@ impl ArbitrageError {
         Self::new(ErrorKind::Storage, message)
     }
 
+    pub fn kv_error(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Storage, message)
+            .with_status(500)
+            .with_code("KV_ERROR")
+    }
+
     pub fn service_unavailable(message: impl Into<String>) -> Self {
         Self::new(ErrorKind::Internal, message)
             .with_status(503)
@@ -240,6 +247,18 @@ impl ArbitrageError {
             .with_status(500)
             .with_code("CACHE_ERROR")
     }
+
+    pub fn processing_error(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Internal, message)
+            .with_status(500)
+            .with_code("PROCESSING_ERROR")
+    }
+
+    pub fn access_denied(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::AccessDenied, message)
+            .with_status(403)
+            .with_code("ACCESS_DENIED")
+    }
 }
 
 // Implement From conversions for common error types
@@ -258,6 +277,18 @@ impl From<worker::Error> for ArbitrageError {
 impl From<worker::kv::KvError> for ArbitrageError {
     fn from(err: worker::kv::KvError) -> Self {
         Self::storage_error(format!("KV error: {:?}", err))
+    }
+}
+
+impl From<&str> for ArbitrageError {
+    fn from(err: &str) -> Self {
+        Self::validation_error(err.to_string())
+    }
+}
+
+impl From<url::ParseError> for ArbitrageError {
+    fn from(err: url::ParseError) -> Self {
+        Self::parse_error(format!("URL parsing error: {}", err))
     }
 }
 

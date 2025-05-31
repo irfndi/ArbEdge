@@ -17,7 +17,10 @@ impl<T> ApiResponse<T> {
             error: None,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    // Fallback to zero if system time is before Unix epoch
+                    std::time::Duration::from_secs(0)
+                })
                 .as_millis() as u64,
         }
     }
@@ -29,7 +32,10 @@ impl<T> ApiResponse<T> {
             error: Some(message),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    // Fallback to zero if system time is before Unix epoch
+                    std::time::Duration::from_secs(0)
+                })
                 .as_millis() as u64,
         }
     }

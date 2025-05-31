@@ -414,8 +414,8 @@ impl MarketDataIngestionService {
         Ok(FundingRateInfo {
             symbol: symbol.to_string(),
             funding_rate,
-            timestamp: Some(Utc::now()),
-            datetime: Some(Utc::now().to_rfc3339()),
+            timestamp: Utc::now().timestamp_millis() as u64,
+            datetime: Utc::now().to_rfc3339(),
             next_funding_time: data["nextFundingTime"]
                 .as_u64()
                 .and_then(|ts| chrono::DateTime::from_timestamp((ts / 1000) as i64, 0)),
@@ -526,8 +526,8 @@ impl MarketDataIngestionService {
                     return Ok(FundingRateInfo {
                         symbol: symbol.to_string(),
                         funding_rate,
-                        timestamp: Some(Utc::now()),
-                        datetime: Some(Utc::now().to_rfc3339()),
+                        timestamp: Utc::now().timestamp_millis() as u64,
+                        datetime: Utc::now().to_rfc3339(),
                         next_funding_time: None,
                         estimated_rate: None,
                     });

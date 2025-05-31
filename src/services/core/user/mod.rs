@@ -7,6 +7,8 @@ pub mod user_access;
 pub mod ai_access;
 pub mod user_exchange_api;
 pub mod session_management;
+pub mod user_activity;
+pub mod group_management;
 
 pub use user_profile::UserProfileService;
 pub use user_trading_preferences::UserTradingPreferencesService;
@@ -17,4 +19,6 @@ pub use user_exchange_api::{
     UserExchangeApiService, ApiKeyValidationResult, ExchangeCompatibilityResult,
     AddApiKeyRequest, UpdateApiKeyRequest, RateLimitInfo,
 };
-pub use session_management::SessionManagementService; 
+pub use session_management::SessionManagementService;
+pub use user_activity::UserActivityService;
+pub use group_management::GroupManagementService; 

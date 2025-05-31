@@ -2,9 +2,10 @@
 // Task 9.1: Technical Indicators Foundation for Hybrid Trading Platform
 // Supports both arbitrage enhancement and standalone technical trading
 
-use crate::services::core::infrastructure::cloudflare_pipelines::CloudflarePipelinesService;
+use crate::services::core::infrastructure::data_ingestion_module::DataIngestionModule;
+use crate::services::core::infrastructure::database_repositories::DatabaseManager;
+use crate::services::core::user::user_trading_preferences::UserTradingPreferencesService;
 use crate::services::core::user::user_trading_preferences::{TradingFocus, UserTradingPreferences};
-use crate::services::{D1Service, UserTradingPreferencesService};
 use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -432,9 +433,10 @@ impl MathUtils {
 
 /// Main service for market analysis and technical indicators
 pub struct MarketAnalysisService {
-    _d1_service: D1Service,
+    #[allow(dead_code)] // TODO: Will be used for database operations in future implementation
+    database_repositories: DatabaseManager,
     preferences_service: UserTradingPreferencesService,
-    pipelines_service: Option<CloudflarePipelinesService>, // For market data ingestion and analysis storage
+    pipelines_service: Option<DataIngestionModule>, // For market data ingestion and analysis storage
     logger: Logger,
     price_cache: HashMap<String, PriceSeries>, // In-memory cache for recent price data
     cache_max_size: usize,                     // Maximum number of cached series
@@ -443,12 +445,12 @@ pub struct MarketAnalysisService {
 
 impl MarketAnalysisService {
     pub fn new(
-        d1_service: D1Service,
+        database_repositories: DatabaseManager,
         preferences_service: UserTradingPreferencesService,
         logger: Logger,
     ) -> Self {
         Self {
-            _d1_service: d1_service,
+            database_repositories,
             preferences_service,
             pipelines_service: None,
             logger,
@@ -459,7 +461,7 @@ impl MarketAnalysisService {
     }
 
     /// Set pipelines service for market data ingestion and analysis storage
-    pub fn set_pipelines_service(&mut self, pipelines_service: CloudflarePipelinesService) {
+    pub fn set_pipelines_service(&mut self, pipelines_service: DataIngestionModule) {
         self.pipelines_service = Some(pipelines_service);
     }
 
@@ -491,7 +493,7 @@ impl MarketAnalysisService {
             // Store to pipelines for historical data and analytics
             let market_data_json = serde_json::to_value(&market_data)?;
             pipelines_service
-                .store_market_data(exchange, symbol, &market_data_json)
+                .store_market_data(exchange, symbol, &serde_json::to_string(&market_data_json)?)
                 .await?;
 
             self.logger.info(&format!(
@@ -526,7 +528,10 @@ impl MarketAnalysisService {
             // Store to pipelines for historical analysis tracking
             let analysis_result_json = serde_json::to_value(&analysis_result)?;
             pipelines_service
-                .store_analysis_results(analysis_type, &analysis_result_json)
+                .store_analysis_results(
+                    analysis_type,
+                    &serde_json::to_string(&analysis_result_json)?,
+                )
                 .await?;
 
             self.logger.info(&format!(

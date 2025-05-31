@@ -14,35 +14,41 @@ pub async fn handle_api_health_check(_req: Request, _env: Env) -> Result<Respons
 
 /// Detailed health check endpoint that tests all services
 pub async fn handle_api_detailed_health_check(_req: Request, env: Env) -> Result<Response> {
-    // Check service health
-    let kv_healthy = env.kv("ArbEdgeKV").is_ok();
-    let d1_healthy = env.d1("ArbEdgeD1").is_ok();
-    // add R2 health check
-
-    // Test KV store with a simple operation
-    let kv_operational = if kv_healthy {
-        match env.kv("ArbEdgeKV") {
-            Ok(kv) => {
-                // Try a simple get operation to test connectivity
-                (kv.get("health_check_test").text().await).is_ok()
+    // Test KV store with dedicated health check key
+    let kv_operational = match env.kv("ArbEdgeKV") {
+        Ok(kv) => {
+            // Check against dedicated health check key that should be updated by background process
+            match kv.get("system_health_check").text().await {
+                Ok(Some(value)) => {
+                    // Validate that the health check key contains recent timestamp
+                    if let Ok(timestamp) = value.parse::<u64>() {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        // Health check key should be updated within last 5 minutes (300 seconds)
+                        now.saturating_sub(timestamp) < 300
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
             }
-            Err(_) => false,
         }
-    } else {
-        false
+        Err(_) => false,
     };
 
     // Test D1 database with a simple query
-    let d1_operational = if d1_healthy {
-        match services::core::infrastructure::D1Service::new(&env) {
-            Ok(d1_service) => {
-                // Try a simple query to test connectivity
-                (d1_service.health_check().await).unwrap_or(false)
-            }
-            Err(_) => false,
+    let d1_operational = match env.d1("ArbEdgeDB") {
+        Ok(d1_database) => {
+            let database_manager = services::core::infrastructure::database_repositories::DatabaseManager::new(
+                std::sync::Arc::new(d1_database),
+                services::core::infrastructure::database_repositories::DatabaseManagerConfig::default()
+            );
+            // Try a simple query to test connectivity
+            database_manager.health_check().await
         }
-    } else {
-        false
+        Err(_) => false,
     };
 
     // Test Telegram service by checking if bot token is configured
@@ -59,6 +65,12 @@ pub async fn handle_api_detailed_health_check(_req: Request, env: Env) -> Result
     let overall_healthy =
         kv_operational && d1_operational && telegram_healthy && exchange_healthy && ai_healthy;
 
+    // Use consistent SystemTime for timestamp
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
     let response = ApiResponse::success(serde_json::json!({
         "status": if overall_healthy { "healthy" } else { "degraded" },
         "services": {
@@ -68,7 +80,23 @@ pub async fn handle_api_detailed_health_check(_req: Request, env: Env) -> Result
             "exchange_service": if exchange_healthy { "online" } else { "offline" },
             "ai_service": if ai_healthy { "online" } else { "offline" }
         },
-        "timestamp": chrono::Utc::now().timestamp()
+        "timestamp": timestamp
     }));
     Response::from_json(&response)
+}
+
+/// Update the health check key in KV store (should be called by background process)
+pub async fn update_health_check_key(env: &Env) -> Result<()> {
+    if let Ok(kv) = env.kv("ArbEdgeKV") {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Update the health check key with current timestamp
+        kv.put("system_health_check", timestamp.to_string())?
+            .execute()
+            .await?;
+    }
+    Ok(())
 }

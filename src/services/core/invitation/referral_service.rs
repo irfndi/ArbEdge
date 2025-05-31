@@ -1,7 +1,8 @@
-use crate::services::core::infrastructure::d1_database::D1Service;
+use crate::services::core::infrastructure::database_repositories::DatabaseManager;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +81,7 @@ pub struct ReferralStatistics {
 }
 
 pub struct ReferralService {
-    d1_service: D1Service,
+    d1_service: DatabaseManager,
 }
 
 // Configurable bonus constants
@@ -90,7 +91,7 @@ const POINTS_BONUS: f64 = 100.0;
 const SUBSCRIPTION_DISCOUNT_BONUS: f64 = 10.0;
 
 impl ReferralService {
-    pub fn new(d1_service: D1Service) -> Self {
+    pub fn new(d1_service: DatabaseManager) -> Self {
         Self { d1_service }
     }
 
@@ -133,55 +134,62 @@ impl ReferralService {
 
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
             let id = row
                 .get("id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: id"))?;
             let user_id = row
                 .get("user_id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: user_id"))?;
             let referral_code = row
                 .get("referral_code")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: referral_code"))?;
             let is_active_str = row
                 .get("is_active")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: is_active"))?;
             let is_active = is_active_str
                 .parse::<bool>()
-                .map_err(|e| anyhow!("Invalid is_active value '{}': {}", is_active_str, e))?;
+                .map_err(|e| anyhow!("Invalid is_active value: {}", e))?;
             let created_at_str = row
                 .get("created_at")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: created_at"))?;
             let created_at = DateTime::parse_from_rfc3339(created_at_str)
-                .map_err(|e| anyhow!("Invalid created_at format '{}': {}", created_at_str, e))?
+                .map_err(|e| anyhow!("Invalid created_at format: {}", e))?
                 .with_timezone(&Utc);
             let updated_at_str = row
                 .get("updated_at")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: updated_at"))?;
             let updated_at = DateTime::parse_from_rfc3339(updated_at_str)
                 .map_err(|e| anyhow!("Invalid updated_at format '{}': {}", updated_at_str, e))?
                 .with_timezone(&Utc);
             let total_uses_str = row
                 .get("total_uses")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: total_uses"))?;
             let total_uses = total_uses_str
                 .parse::<u32>()
-                .map_err(|e| anyhow!("Invalid total_uses value '{}': {}", total_uses_str, e))?;
+                .map_err(|e| anyhow!("Invalid total_uses value: {}", e))?;
             let total_bonuses_str = row
                 .get("total_bonuses_earned")
-                .ok_or_else(|| anyhow!("Missing required field: total_bonuses_earned"))?;
-            let total_bonuses_earned = total_bonuses_str.parse::<f64>().map_err(|e| {
-                anyhow!(
-                    "Invalid total_bonuses_earned value '{}': {}",
-                    total_bonuses_str,
-                    e
-                )
-            })?;
+                .and_then(|v| v.as_str())
+                .unwrap_or("0.0");
+            let total_bonuses_earned = total_bonuses_str
+                .parse::<f64>()
+                .map_err(|e| anyhow!("Invalid total_bonuses_earned value: {}", e))?;
 
             Ok(UserReferralCode {
-                id: id.clone(),
-                user_id: user_id.clone(),
-                referral_code: referral_code.clone(),
+                id: id.to_string(),
+                user_id: user_id.to_string(),
+                referral_code: referral_code.to_string(),
                 is_active,
                 created_at,
                 updated_at,
@@ -189,7 +197,13 @@ impl ReferralService {
                 total_bonuses_earned,
                 last_used_at: row
                     .get("last_used_at")
-                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                    .and_then(|s| {
+                        if let Some(s_str) = s.as_str() {
+                            DateTime::parse_from_rfc3339(s_str).ok()
+                        } else {
+                            None
+                        }
+                    })
                     .map(|dt| dt.with_timezone(&Utc)),
             })
         } else {
@@ -260,13 +274,12 @@ impl ReferralService {
             .d1_service
             .query(existing_usage_check, &[new_user_id.into()])
             .await?;
-        if let Some(row) = existing_result.first() {
-            let default_count = "0".to_string();
-            let count: i32 = row
-                .get("count")
-                .unwrap_or(&default_count)
-                .parse()
-                .unwrap_or(0);
+        if let Some(row) = existing_result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let count_str = row.get("count").and_then(|v| v.as_str()).unwrap_or("0");
+            let count = count_str.parse::<u32>().unwrap_or(0);
             if count > 0 {
                 return Err(anyhow!(
                     "User has already been referred and cannot use another referral code"
@@ -366,44 +379,34 @@ impl ReferralService {
             .await?;
 
         let mut leaderboard = Vec::new();
-        for (index, row) in result.iter().enumerate() {
+        for (index, row) in result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .iter()
+            .enumerate()
+        {
             let user_id = row.get("user_id").ok_or_else(|| {
                 anyhow!(
                     "Missing required field: user_id in leaderboard row {}",
                     index + 1
                 )
             })?;
-            let total_referrals_str = row.get("total_referrals").ok_or_else(|| {
-                anyhow!(
-                    "Missing required field: total_referrals in leaderboard row {}",
-                    index + 1
-                )
-            })?;
-            let total_referrals: u32 = total_referrals_str.parse().map_err(|e| {
-                anyhow!(
-                    "Invalid total_referrals value '{}' in row {}: {}",
-                    total_referrals_str,
-                    index + 1,
-                    e
-                )
-            })?;
-            let total_bonuses_str = row.get("total_bonuses").ok_or_else(|| {
-                anyhow!(
-                    "Missing required field: total_bonuses in leaderboard row {}",
-                    index + 1
-                )
-            })?;
-            let total_bonuses: f64 = total_bonuses_str.parse().map_err(|e| {
-                anyhow!(
-                    "Invalid total_bonuses value '{}' in row {}: {}",
-                    total_bonuses_str,
-                    index + 1,
-                    e
-                )
-            })?;
+            let total_referrals_str = row
+                .get("total_referrals")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0");
+            let total_referrals: u32 = total_referrals_str
+                .parse()
+                .map_err(|e| anyhow!("Failed to parse total_referrals: {}", e))?;
+            let total_bonuses_str = row
+                .get("total_bonuses")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0.0");
+            let total_bonuses: f64 = total_bonuses_str
+                .parse()
+                .map_err(|e| anyhow!("Failed to parse total_bonuses: {}", e))?;
 
             leaderboard.push(ReferralStatistics {
-                user_id: user_id.clone(),
+                user_id: user_id.as_str().unwrap_or("").to_string(),
                 total_referrals,
                 successful_conversions: 0, // Would need additional query
                 total_bonuses_earned: total_bonuses,
@@ -485,13 +488,20 @@ impl ReferralService {
         let query = "SELECT COUNT(*) as count FROM user_referral_codes WHERE referral_code = ?";
         let result = self.d1_service.query(query, &[code.into()]).await?;
 
-        if let Some(row) = result.first() {
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
             let count_str = row
                 .get("count")
                 .ok_or_else(|| anyhow!("Missing count field in database result"))?;
-            let count = count_str
-                .parse::<i32>()
-                .map_err(|e| anyhow!("Invalid count format '{}': {}", count_str, e))?;
+            let count = if let Some(count_str_val) = count_str.as_str() {
+                count_str_val
+                    .parse::<u32>()
+                    .map_err(|e| anyhow!("Invalid count format '{}': {}", count_str_val, e))?
+            } else {
+                0
+            };
             Ok(count > 0)
         } else {
             Ok(false)
@@ -537,31 +547,42 @@ impl ReferralService {
             .query(query, &[referral_code.into()])
             .await?;
 
-        if let Some(row) = result.first() {
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
             // Extract and validate required fields
             let id = row
                 .get("id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: id"))?;
             let user_id = row
                 .get("user_id")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: user_id"))?;
             let referral_code = row
                 .get("referral_code")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: referral_code"))?;
             let is_active_str = row
                 .get("is_active")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: is_active"))?;
             let created_at_str = row
                 .get("created_at")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: created_at"))?;
             let updated_at_str = row
                 .get("updated_at")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: updated_at"))?;
             let total_uses_str = row
                 .get("total_uses")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: total_uses"))?;
             let total_bonuses_str = row
                 .get("total_bonuses_earned")
+                .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing required field: total_bonuses_earned"))?;
 
             // Parse with proper error handling
@@ -586,9 +607,9 @@ impl ReferralService {
             })?;
 
             Ok(UserReferralCode {
-                id: id.clone(),
-                user_id: user_id.clone(),
-                referral_code: referral_code.clone(),
+                id: id.to_string(),
+                user_id: user_id.to_string(),
+                referral_code: referral_code.to_string(),
                 is_active,
                 created_at,
                 updated_at,
@@ -596,7 +617,13 @@ impl ReferralService {
                 total_bonuses_earned,
                 last_used_at: row
                     .get("last_used_at")
-                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                    .and_then(|s| {
+                        if let Some(s_str) = s.as_str() {
+                            DateTime::parse_from_rfc3339(s_str).ok()
+                        } else {
+                            None
+                        }
+                    })
                     .map(|dt| dt.with_timezone(&Utc)),
             })
         } else {
@@ -667,13 +694,12 @@ impl ReferralService {
         let query = "SELECT COUNT(*) as count FROM referral_usage WHERE referrer_user_id = ?";
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
-            let count_str = row
-                .get("count")
-                .ok_or_else(|| anyhow!("Missing count field in database result"))?;
-            let count = count_str
-                .parse::<u32>()
-                .map_err(|e| anyhow!("Invalid count format '{}': {}", count_str, e))?;
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let count_str = row.get("count").and_then(|v| v.as_str()).unwrap_or("0");
+            let count = count_str.parse::<u32>().unwrap_or(0);
             Ok(count)
         } else {
             Ok(0)
@@ -700,13 +726,20 @@ impl ReferralService {
             )
             .await?;
 
-        if let Some(row) = result.first() {
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
             let count_str = row
                 .get("count")
                 .ok_or_else(|| anyhow!("Missing count field in database result"))?;
-            let count = count_str
-                .parse::<u32>()
-                .map_err(|e| anyhow!("Invalid count format '{}': {}", count_str, e))?;
+            let count = if let Some(count_str_val) = count_str.as_str() {
+                count_str_val
+                    .parse::<u32>()
+                    .map_err(|e| anyhow!("Invalid count format '{}': {}", count_str_val, e))?
+            } else {
+                0
+            };
             Ok(count)
         } else {
             Ok(0)
@@ -717,13 +750,12 @@ impl ReferralService {
         let query = "SELECT COALESCE(SUM(bonus_awarded), 0) as total FROM referral_usage WHERE referrer_user_id = ?";
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
-            let total_str = row
-                .get("total")
-                .ok_or_else(|| anyhow!("Missing total field in database result"))?;
-            let total = total_str
-                .parse::<f64>()
-                .map_err(|e| anyhow!("Invalid total format '{}': {}", total_str, e))?;
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let total_str = row.get("total").and_then(|v| v.as_str()).unwrap_or("0.0");
+            let total = total_str.parse::<f64>().unwrap_or(0.0);
             Ok(total)
         } else {
             Ok(0.0)
@@ -743,13 +775,12 @@ impl ReferralService {
         "#;
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
-            let count_str = row
-                .get("count")
-                .ok_or_else(|| anyhow!("Missing count field in database result"))?;
-            let count = count_str
-                .parse::<u32>()
-                .map_err(|e| anyhow!("Invalid count format '{}': {}", count_str, e))?;
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let count_str = row.get("count").and_then(|v| v.as_str()).unwrap_or("0");
+            let count = count_str.parse::<u32>().unwrap_or(0);
             Ok(count)
         } else {
             Ok(0)
@@ -763,13 +794,12 @@ impl ReferralService {
         "#;
         let result = self.d1_service.query(query, &[user_id.into()]).await?;
 
-        if let Some(row) = result.first() {
-            let total_str = row
-                .get("total")
-                .ok_or_else(|| anyhow!("Missing total field in database result"))?;
-            let total = total_str
-                .parse::<f64>()
-                .map_err(|e| anyhow!("Invalid total format '{}': {}", total_str, e))?;
+        if let Some(row) = result
+            .results::<HashMap<String, serde_json::Value>>()?
+            .first()
+        {
+            let total_str = row.get("total").and_then(|v| v.as_str()).unwrap_or("0.0");
+            let total = total_str.parse::<f64>().unwrap_or(0.0);
             Ok(total)
         } else {
             Ok(0.0)
