@@ -1105,14 +1105,26 @@ mod tests {
     fn create_test_ticker(symbol: &str, price: f64, volume: f64, change_percent: f64) -> Ticker {
         Ticker {
             symbol: symbol.to_string(),
-            bid: Some(price - 10.0),
-            ask: Some(price + 10.0),
-            last: Some(price),
+            timestamp: Utc::now().timestamp_millis() as u64,
+            datetime: Utc::now().to_rfc3339(),
             high: Some(price * (1.0 + change_percent / 100.0)),
             low: Some(price * (1.0 - change_percent / 100.0)),
+            bid: Some(price - 10.0),
+            bid_volume: Some(volume / 10.0),
+            ask: Some(price + 10.0),
+            ask_volume: Some(volume / 10.0),
+            vwap: Some(price),
+            open: Some(price - (price * change_percent / 200.0)), // Simplified open
+            close: Some(price),
+            last: Some(price),
+            previous_close: Some(price - (price * change_percent / 100.0)), // Simplified prev_close
+            change: Some(price * change_percent / 100.0),
+            percentage: Some(change_percent),
+            average: Some(price),
+            base_volume: Some(volume),
+            quote_volume: Some(volume * price),
             volume: Some(volume),
-            timestamp: Some(Utc::now()),
-            datetime: Some(Utc::now().to_rfc3339()),
+            info: serde_json::json!({}),
         }
     }
 
@@ -1120,10 +1132,17 @@ mod tests {
         FundingRateInfo {
             symbol: symbol.to_string(),
             funding_rate: rate,
-            timestamp: Some(Utc::now()),
-            datetime: Some(Utc::now().to_rfc3339()),
-            next_funding_time: Some(Utc::now()),
+            timestamp: Utc::now().timestamp_millis() as u64,
+            datetime: Utc::now().to_rfc3339(),
+            next_funding_time: Some(Utc::now().timestamp_millis() as u64 + 8 * 3600 * 1000), // e.g., 8 hours later
             estimated_rate: Some(rate),
+            info: serde_json::Value::Null,
+            exchange: ExchangeIdEnum::Binance, // Default value
+            funding_interval_hours: 8,         // Default value
+            mark_price: Some(rate * 100000.0 + 100.0), // Mock value
+            index_price: Some(rate * 100000.0 + 90.0), // Mock value
+            estimated_settle_price: Some(rate * 100000.0 + 95.0), // Mock value
+            funding_countdown: Some((8 * 3600 * 1000) / 1000), // Mock countdown in seconds
         }
     }
 

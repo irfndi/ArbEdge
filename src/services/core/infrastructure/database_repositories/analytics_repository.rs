@@ -204,8 +204,6 @@ impl AnalyticsRepository {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         );
 
-        let timestamp = analytics.timestamp.timestamp_millis();
-
         let result = stmt
             .bind(&[
                 analytics.analytics_id.clone().into(),
@@ -220,7 +218,7 @@ impl AnalyticsRepository {
                     .clone()
                     .unwrap_or_default()
                     .into(),
-                timestamp.into(),
+                (analytics.timestamp.timestamp_millis() as u64).into(),
                 analytics.session_id.clone().unwrap_or_default().into(),
                 analytics_metadata_json.into(),
             ])
@@ -233,7 +231,10 @@ impl AnalyticsRepository {
             .run()
             .await
             .map_err(|e| {
-                database_error("execute query", format!("Failed to execute query: {}", e))
+                database_error(
+                    "store_trading_analytics_execute",
+                    format!("Failed to execute query: {}", e),
+                )
             });
 
         // Invalidate cache for user analytics
@@ -292,7 +293,10 @@ impl AnalyticsRepository {
             .all()
             .await
             .map_err(|e| {
-                database_error("execute query", format!("Failed to execute query: {}", e))
+                database_error(
+                    "get_trading_analytics_execute_all",
+                    format!("Failed to execute query: {}", e),
+                )
             })?;
 
         let mut analytics = Vec::new();
@@ -533,7 +537,10 @@ impl AnalyticsRepository {
                 .first::<HashMap<String, serde_json::Value>>(None)
                 .await
                 .map_err(|e| {
-                    database_error(&format!("Failed to execute system analytics query: {}", e))
+                    database_error(
+                        "get_system_analytics_summary_execute_first",
+                        format!("Failed to execute system analytics query: {}", e),
+                    )
                 })?;
 
             if let Some(row) = result {

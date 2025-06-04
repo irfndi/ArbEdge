@@ -16,6 +16,12 @@ use super::{
     DataFormat, DataTransformer, IngestionEvent, IngestionEventType, MessagePriority,
 };
 
+// Add imports for conditional sleep
+#[cfg(target_arch = "wasm32")]
+use gloo_timers::future::sleep;
+#[cfg(target_arch = "wasm32")]
+use std::time::Duration;
+
 /// Ingestion request for the coordinator
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IngestionRequest {
@@ -504,6 +510,9 @@ impl IngestionCoordinator {
         };
 
         if should_rate_limit {
+            #[cfg(target_arch = "wasm32")]
+            sleep(Duration::from_millis(100)).await;
+            #[cfg(not(target_arch = "wasm32"))]
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             return Err(ArbitrageError::rate_limit_error("Rate limit exceeded"));
         }
@@ -515,6 +524,9 @@ impl IngestionCoordinator {
         };
 
         if should_circuit_break {
+            #[cfg(target_arch = "wasm32")]
+            sleep(Duration::from_millis(500)).await;
+            #[cfg(not(target_arch = "wasm32"))]
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             return Err(ArbitrageError::service_unavailable(
                 "Circuit breaker is open",

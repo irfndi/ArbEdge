@@ -381,14 +381,22 @@ impl DatabaseManager {
         let result = stmt
             .bind(params)
             .map_err(|e| {
-                ArbitrageError::database_error(format!("Failed to bind parameters: {}", e))
+                database_error(
+                    "query_bind_parameters",
+                    format!("Failed to bind parameters: {}", e),
+                )
             })?
             .all()
             .await
-            .map_err(|e| ArbitrageError::database_error(format!("Failed to execute query: {}", e)));
+            .map_err(|e| {
+                database_error(
+                    "query_execute_all",
+                    format!("Failed to execute query: {}", e),
+                )
+            })?;
 
-        self.update_metrics(start_time, result.is_ok()).await;
-        result
+        self.update_metrics(start_time, true).await;
+        Ok(result)
     }
 
     /// Execute a statement (legacy compatibility method)
@@ -403,16 +411,22 @@ impl DatabaseManager {
         let result = stmt
             .bind(params)
             .map_err(|e| {
-                ArbitrageError::database_error(format!("Failed to bind parameters: {}", e))
+                database_error(
+                    "execute_bind_parameters",
+                    format!("Failed to bind parameters: {}", e),
+                )
             })?
             .run()
             .await
             .map_err(|e| {
-                ArbitrageError::database_error(format!("Failed to execute statement: {}", e))
-            });
+                database_error(
+                    "execute_run_statement",
+                    format!("Failed to execute statement: {}", e),
+                )
+            })?;
 
-        self.update_metrics(start_time, result.is_ok()).await;
-        result
+        self.update_metrics(start_time, true).await;
+        Ok(result)
     }
 
     /// Execute a transaction (legacy compatibility method)

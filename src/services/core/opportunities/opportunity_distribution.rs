@@ -28,10 +28,10 @@ pub trait NotificationSender: Send + Sync {
     async fn send_message(&self, chat_id: &str, message: &str) -> ArbitrageResult<()>;
 }
 
-// WASM version without Send + Sync bounds
+// WASM version - NOW ALSO Send + Sync
 #[cfg(target_arch = "wasm32")]
-#[async_trait::async_trait(?Send)]
-pub trait NotificationSender {
+#[async_trait::async_trait]
+pub trait NotificationSender: Send + Sync {
     async fn send_opportunity_notification(
         &self,
         chat_id: &str,

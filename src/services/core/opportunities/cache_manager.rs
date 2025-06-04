@@ -613,25 +613,27 @@ mod tests {
     fn create_test_technical_opportunity() -> TechnicalOpportunity {
         TechnicalOpportunity {
             id: "test_tech_1".to_string(),
-            symbol: "ETHUSDT".to_string(),
-            exchange: ExchangeIdEnum::Binance,
+            trading_pair: "ETHUSDT".to_string(),
+            exchanges: vec![ExchangeIdEnum::Binance.to_string()],
             signal_type: TechnicalSignalType::Buy,
-            signal_strength: TechnicalSignalStrength::Strong,
-            risk_level: TechnicalRiskLevel::Medium,
+            confidence: 0.85,
+            risk_level: "medium".to_string(),
             entry_price: 3000.0,
             target_price: 3150.0,
             stop_loss: 2950.0,
-            confidence: 0.85,
-            timeframe: "1h".to_string(),
-            indicators: serde_json::json!({"RSI": 70, "MACD": "bullish"}),
             created_at: 1234567890,
-            expires_at: 1234567890 + 60000,
-            metadata: serde_json::json!({"signal_strength": "strong"}),
+            expires_at: Some(1234567890 + 60000),
             pair: "ETHUSDT".to_string(),
             expected_return_percentage: 0.05,
             details: Some("Strong buy signal".to_string()),
-            confidence_score: 0.85,
             timestamp: 1234567890,
+            metadata: serde_json::json!({"signal_strength_enum": "strong"}),
+            symbol: "ETHUSDT".to_string(),
+            exchange: ExchangeIdEnum::Binance.to_string(),
+            signal_strength: 0.7,
+            confidence_score: 0.85,
+            timeframe: "1h".to_string(),
+            indicators: serde_json::json!({"RSI": 70, "MACD": "bullish"}),
         }
     }
 
@@ -684,6 +686,6 @@ mod tests {
         assert_eq!(tech_opp.symbol, "ETHUSDT");
         assert_eq!(tech_opp.confidence_score, 0.85);
         assert!(matches!(tech_opp.signal_type, TechnicalSignalType::Buy));
-        assert!(matches!(tech_opp.risk_level, TechnicalRiskLevel::Medium));
+        assert_eq!(tech_opp.risk_level, "medium".to_string());
     }
 }
