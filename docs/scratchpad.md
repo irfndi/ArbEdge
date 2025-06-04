@@ -98,6 +98,14 @@
 - **Caching Strategy**: Multi-layer caching reducing external API calls by 60-80%
 - **Resource Optimization**: Memory-efficient processing with automatic cleanup
 
+### 🔄 **IN PROGRESS: Fix `make ci` Failures**
+- **Status**: ⚪ **PLANNING COMPLETE - READY FOR EXECUTION**
+- **File**: `docs/implementation-plan/fix-make-ci-failures.md`
+- **Context**: The `make ci` command is failing with 170 errors and 17 warnings, blocking CI.
+- **Goal**: Resolve all compilation errors and linter warnings to ensure `make ci-pipeline` passes successfully.
+- **Taskmaster ID**: 1 (Main task)
+- **Subtasks**: 1.1 to 1.11 (details in implementation plan and Taskmaster)
+
 ### 🔄 **IN PROGRESS: Post-Modularization CI Fixes - 6 Compilation Errors**
 - **Status**: 🎯 **EXECUTOR MODE - CRITICAL PRIORITY**
 - **File**: `docs/implementation-plan/fix-initial-compilation-errors.md`

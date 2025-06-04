@@ -51,3 +51,15 @@ tarpaulin-report.html
 .env.*
 
 test_results
+
+# Added by Task Master AI
+logs
+dev-debug.log
+# Dependency directories
+# Editor directories and files
+.idea
+.vscode
+# OS specific
+# Task files
+tasks.json
+tasks/ 
