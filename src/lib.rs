@@ -599,21 +599,8 @@ async fn route_detailed_health_check(
 // DURABLE OBJECTS
 // ============================================================================
 
-#[durable_object]
-pub struct PositionsManager {
-    _state: State,
-}
-
-#[durable_object]
-impl DurableObject for PositionsManager {
-    fn new(state: State, _env: worker::Env) -> Self {
-        Self { _state: state }
-    }
-
-    async fn fetch(&mut self, _req: Request) -> Result<Response> {
-        Response::ok("Positions Manager")
-    }
-}
+// All Durable Objects removed - complex WASM bindings not needed for current implementation
+// Future implementation can add these back when proper Durable Objects are required
 
 #[event(fetch)]
 pub async fn main(req: Request, env: worker::Env, _ctx: Context) -> Result<Response> {

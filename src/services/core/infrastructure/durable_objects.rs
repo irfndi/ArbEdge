@@ -368,62 +368,14 @@ impl DurableObjectsManager {
 // Placeholder structs for future Durable Objects implementation
 // These will be properly implemented when deploying to Cloudflare Workers with Durable Objects enabled
 
-/// Market Data Coordinator - Future Durable Object implementation
+/// Market Data Coordinator - Durable Object implementation (placeholder)
 pub struct MarketDataCoordinatorDO;
 
-impl Default for MarketDataCoordinatorDO {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MarketDataCoordinatorDO {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-/// Global Rate Limiter - Future Durable Object implementation
+/// Global Rate Limiter - Durable Object implementation (placeholder)
 pub struct GlobalRateLimiterDO;
 
-impl Default for GlobalRateLimiterDO {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GlobalRateLimiterDO {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-/// Opportunity Coordinator - Future Durable Object implementation
+/// Opportunity Coordinator - Durable Object implementation (placeholder)
 pub struct OpportunityCoordinatorDO;
 
-impl Default for OpportunityCoordinatorDO {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl OpportunityCoordinatorDO {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-/// User Opportunity Queue - Future Durable Object implementation
+/// User Opportunity Queue - Durable Object implementation (placeholder)
 pub struct UserOpportunityQueueDO;
-
-impl Default for UserOpportunityQueueDO {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl UserOpportunityQueueDO {
-    pub fn new() -> Self {
-        Self
-    }
-}

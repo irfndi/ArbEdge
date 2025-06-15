@@ -79,32 +79,8 @@ bucket_name = "prod-arb-edge-analytics"
 # max_retries = 2
 # dead_letter_queue = "dead-letter-queue"
 
-# Durable Objects (Production-Ready Cache Management)
-[[durable_objects.bindings]]
-name = "MARKET_DATA_COORDINATOR"
-class_name = "MarketDataCoordinatorDO"
-
-[[durable_objects.bindings]]
-name = "GLOBAL_RATE_LIMITER"
-class_name = "GlobalRateLimiterDO"
-
-[[durable_objects.bindings]]
-name = "OPPORTUNITY_COORDINATOR"
-class_name = "OpportunityCoordinatorDO"
-
-[[durable_objects.bindings]]
-name = "USER_OPPORTUNITY_QUEUE"
-class_name = "UserOpportunityQueueDO"
-
-# Durable Objects Migrations
-[[migrations]]
-tag = "v1"
-new_classes = [
-  "MarketDataCoordinatorDO",
-  "GlobalRateLimiterDO",
-  "OpportunityCoordinatorDO",
-  "UserOpportunityQueueDO"
-]
+# Durable Objects configuration removed - complex WASM bindings not needed for current implementation
+# Future implementation can add these back when proper Durable Objects are required
 
 # Legacy binding (keeping for backward compatibility)
 # [[durable_objects.bindings]]
