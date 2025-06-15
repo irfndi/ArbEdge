@@ -107,10 +107,29 @@ make quality  # alias
 
 ## 🔧 Environment Requirements
 
-### Required Tools
-- **Rust**: Latest stable (managed via rustup)
+### Prerequisites
+
+- **Rust**: v1.82+ (for Cloudflare Workers compilation)
 - **Node.js**: v22.x (for wrangler)
-- **Git**: For version control operations
+- **PNPM**: Package manager for wrangler dependency
+- **Cargo**: v1.82+ (comes with Rust)
+- **Git**: Version control
+
+### Required Tools
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install WASM target
+rustup target add wasm32-unknown-unknown
+
+# Install PNPM if not already installed
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+
+# Install Wrangler via PNPM
+pnpm add -D wrangler@latest
+```
 
 ### Optional Tools (Enhanced Features)
 ```bash
@@ -122,9 +141,6 @@ cargo install cargo-tarpaulin
 
 # For code statistics
 cargo install tokei
-
-# For Cloudflare deployment
-npm install -g wrangler@latest
 ```
 
 ## 🎯 Recommended Workflow
@@ -204,10 +220,10 @@ rustup target add wasm32-unknown-unknown
 ### Wrangler Issues
 ```bash
 # Install/update wrangler
-npm install -g wrangler@latest
+pnpm add -D wrangler@latest
 
-# Verify installation
-wrangler --version
+# Check version
+pnpm wrangler --version
 ```
 
 ## 💡 Tips

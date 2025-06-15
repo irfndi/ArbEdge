@@ -1,17 +1,16 @@
 // Cache Manager Module - Centralized KV Operations and Caching Strategies
 // Consolidates caching logic from multiple services with optimized patterns for high concurrency
 
-use crate::utils::{ArbitrageError, ArbitrageResult};
+use crate::utils::error::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
-
-// Helper for sleeping (abstracts worker::Delay)
-async fn sleep_ms_free(ms: u64) {
-    use std::time::Duration;
-    worker::Delay::from(Duration::from_millis(ms)).await;
-}
 use std::collections::HashMap;
 use std::sync::Arc;
-use worker::kv::KvStore;
+use worker::{console_log, kv::KvStore};
+
+// Helper for sleeping (abstracts worker::Delay)
+async fn sleep_ms(ms: u64) {
+    worker::Delay::from(std::time::Duration::from_millis(ms)).await;
+}
 
 /// Cache configuration for different data types and access patterns
 #[derive(Debug, Clone)]
@@ -41,17 +40,24 @@ impl Default for CacheConfig {
 
 /// Cache operation result with metadata
 #[derive(Debug, Clone)]
-pub struct CacheResult {
-    pub success: bool,
-    pub key: String,
-    pub operation: CacheOperation,
-    pub execution_time_ms: u64,
-    pub cache_hit: bool,
-    pub data_size_bytes: usize,
+pub struct CacheResult<T> {
+    pub data: Option<T>,
+    pub hit: bool,
+    pub source: CacheSource,
+    pub latency_ms: f64,
+    pub compression_ratio: Option<f64>,
 }
 
-/// Cache operation types
-#[derive(Debug, Clone, PartialEq)]
+/// Cache data source types
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CacheSource {
+    Memory,   // KV cache hit
+    Pipeline, // Pipeline data hit
+    Api,      // Direct API call (uncached subrequest)
+}
+
+/// Cache operation types for metrics
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CacheOperation {
     Get,
     Set,
@@ -168,7 +174,7 @@ impl CacheManager {
                             let now = chrono::Utc::now().timestamp_millis() as u64;
                             if now > expires_at {
                                 // Entry expired, delete it and return None
-                                let _ = self.delete(key).await;
+                                let _ = self.delete::<T>(key).await;
                                 self.update_stats(CacheOperation::Get, execution_time, false, 0);
                                 return Ok(None);
                             }
@@ -221,7 +227,7 @@ impl CacheManager {
         key: &str,
         value: &T,
         ttl_seconds: Option<u64>,
-    ) -> ArbitrageResult<CacheResult>
+    ) -> ArbitrageResult<CacheResult<T>>
     where
         T: Serialize + Clone, // Keep Clone bound, it's necessary for value.clone() below
     {
@@ -263,13 +269,12 @@ impl CacheManager {
             Ok(_) => {
                 self.update_stats(CacheOperation::Set, execution_time, true, value_str.len());
                 Ok(CacheResult {
-                    success: true,
-                    key: key.to_string(),
-                    operation: CacheOperation::Set,
-                    execution_time_ms: execution_time,
-                    cache_hit: false, // Set operations are not cache hits
-                    data_size_bytes: value_str.len(),
-                }) // Added missing parenthesis
+                    data: Some(value.clone()),
+                    hit: false,
+                    source: CacheSource::Memory,
+                    latency_ms: 0.0,
+                    compression_ratio: None,
+                })
             }
             Err(e) => {
                 self.update_stats(CacheOperation::Set, execution_time, false, 0);
@@ -279,7 +284,7 @@ impl CacheManager {
     }
 
     /// Delete value from cache
-    pub async fn delete(&self, key: &str) -> ArbitrageResult<CacheResult> {
+    pub async fn delete<T>(&self, key: &str) -> ArbitrageResult<CacheResult<T>> {
         let start_time = chrono::Utc::now().timestamp_millis() as u64;
         let namespaced_key = self.build_key(key);
 
@@ -290,13 +295,12 @@ impl CacheManager {
             Ok(_) => {
                 self.update_stats(CacheOperation::Delete, execution_time, true, 0);
                 Ok(CacheResult {
-                    success: true,
-                    key: key.to_string(),
-                    operation: CacheOperation::Delete,
-                    execution_time_ms: execution_time,
-                    cache_hit: false,
-                    data_size_bytes: 0,
-                }) // Added missing parenthesis
+                    data: None,
+                    hit: false,
+                    source: CacheSource::Memory,
+                    latency_ms: 0.0,
+                    compression_ratio: None,
+                })
             }
             Err(e) => {
                 self.update_stats(CacheOperation::Delete, execution_time, false, 0);
@@ -339,7 +343,7 @@ impl CacheManager {
     pub async fn batch_set<T>(
         &self,
         operations: &[(&str, &T, Option<u64>)],
-    ) -> ArbitrageResult<Vec<CacheResult>>
+    ) -> ArbitrageResult<Vec<CacheResult<T>>>
     where
         T: Serialize + Clone,
     {
@@ -350,16 +354,13 @@ impl CacheManager {
             for &(key, value, ttl) in chunk {
                 match self.set(key, value, ttl).await {
                     Ok(result) => results.push(result),
-                    Err(_) => {
-                        results.push(CacheResult {
-                            success: false,
-                            key: key.to_string(),
-                            operation: CacheOperation::Set,
-                            execution_time_ms: 0,
-                            cache_hit: false,
-                            data_size_bytes: 0,
-                        }) // Added missing parenthesis
-                    }
+                    Err(_) => results.push(CacheResult {
+                        data: None,
+                        hit: false,
+                        source: CacheSource::Memory,
+                        latency_ms: 0.0,
+                        compression_ratio: None,
+                    }),
                 }
             }
         }
@@ -419,6 +420,163 @@ impl CacheManager {
         *stats = CacheStats::default();
     }
 
+    /// Enhanced cache-first data retrieval with pipeline integration
+    pub async fn get_market_data_cached<T>(
+        &self,
+        cache_key: &str,
+        exchange: &str,
+        symbol: &str,
+        fetch_fn: impl std::future::Future<Output = ArbitrageResult<T>>,
+    ) -> ArbitrageResult<CacheResult<T>>
+    where
+        T: for<'de> serde::Deserialize<'de> + serde::Serialize + Clone,
+    {
+        // 1. Try KV cache first (fastest)
+        if let Ok(Some(data)) = self.get::<T>(cache_key).await {
+            console_log!("🎯 CACHE HIT - KV cache for key: {}", cache_key);
+            return Ok(CacheResult {
+                data: Some(data),
+                hit: true,
+                source: CacheSource::Memory,
+                latency_ms: 0.0, // Cache hit is instant
+                compression_ratio: None,
+            });
+        }
+
+        // 2. Try pipeline data (if available)
+        if let Some(pipeline_data) = self.get_from_pipeline::<T>(exchange, symbol).await? {
+            console_log!("📊 PIPELINE HIT - Found data for {}:{}", exchange, symbol);
+            // Cache pipeline data in KV for faster access
+            let _ = self.set(cache_key, &pipeline_data, Some(300)).await; // 5 min TTL
+            return Ok(CacheResult {
+                data: Some(pipeline_data),
+                hit: true,
+                source: CacheSource::Pipeline,
+                latency_ms: 0.0,
+                compression_ratio: None,
+            });
+        }
+
+        // 3. Fallback to direct API call (last resort - causes uncached subrequest)
+        console_log!(
+            "⚠️ CACHE MISS - Falling back to API for {}:{}",
+            exchange,
+            symbol
+        );
+
+        let start_time = std::time::Instant::now();
+        let api_data = fetch_fn.await?;
+        let latency_ms = start_time.elapsed().as_millis() as f64;
+
+        // Cache the API result for future requests
+        let _ = self.set(cache_key, &api_data, Some(180)).await; // 3 min TTL
+
+        // Record cache miss metrics
+        self.record_cache_miss(cache_key).await;
+
+        Ok(CacheResult {
+            data: Some(api_data),
+            hit: false,
+            source: CacheSource::Api,
+            latency_ms,
+            compression_ratio: None,
+        })
+    }
+
+    /// Get data from pipeline if available
+    async fn get_from_pipeline<T>(&self, exchange: &str, symbol: &str) -> ArbitrageResult<Option<T>>
+    where
+        T: for<'de> serde::Deserialize<'de>,
+    {
+        // Check if pipeline data is available in R2 or pipeline cache
+        let pipeline_key = format!("pipeline:market_data:{}:{}", exchange, symbol);
+
+        // Try to get from pipeline cache first
+        match self.kv_store.get(&pipeline_key).text().await {
+            Ok(Some(data_str)) => match serde_json::from_str::<T>(&data_str) {
+                Ok(data) => return Ok(Some(data)),
+                Err(e) => {
+                    console_log!("❌ Pipeline data parse error: {}", e);
+                }
+            },
+            Ok(None) => {
+                console_log!("📊 No pipeline data for {}:{}", exchange, symbol);
+            }
+            Err(e) => {
+                console_log!("❌ Pipeline cache error: {:?}", e);
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Record cache miss for analytics
+    async fn record_cache_miss(&self, cache_key: &str) {
+        let miss_key = format!("cache_miss:{}", cache_key);
+        let current_count = self
+            .kv_store
+            .get(&miss_key)
+            .text()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        let _ = self
+            .kv_store
+            .put(&miss_key, (current_count + 1).to_string())
+            .unwrap_or_else(|_| self.kv_store.put(&miss_key, "1".to_string()).unwrap())
+            .expiration_ttl(86400) // 24 hours
+            .execute()
+            .await;
+    }
+
+    /// Add proper cache headers to response
+    pub fn add_cache_headers(
+        &self,
+        response: &mut worker::Response,
+        cache_type: &str,
+        ttl_seconds: u64,
+    ) -> ArbitrageResult<()> {
+        let headers = response.headers_mut();
+
+        match cache_type {
+            "market_data" => {
+                headers.set(
+                    "Cache-Control",
+                    &format!("public, max-age={}, s-maxage={}", ttl_seconds, ttl_seconds),
+                )?;
+                headers.set("Vary", "Accept-Encoding")?;
+                headers.set("X-Cache-Type", "market-data")?;
+            }
+            "opportunities" => {
+                headers.set(
+                    "Cache-Control",
+                    &format!("public, max-age={}, s-maxage={}", ttl_seconds, ttl_seconds),
+                )?;
+                headers.set("Vary", "User-Agent, Accept-Encoding")?;
+                headers.set("X-Cache-Type", "opportunities")?;
+            }
+            "static" => {
+                headers.set(
+                    "Cache-Control",
+                    &format!("public, max-age={}, immutable", ttl_seconds),
+                )?;
+                headers.set("X-Cache-Type", "static")?;
+            }
+            _ => {
+                headers.set("Cache-Control", &format!("public, max-age={}", ttl_seconds))?;
+            }
+        }
+
+        // Add ETag for conditional requests
+        let etag = format!("\"{}\"", chrono::Utc::now().timestamp());
+        headers.set("ETag", &etag)?;
+
+        Ok(())
+    }
+
     // ============= SPECIALIZED CACHE OPERATIONS =============
 
     /// Cache user session data with optimized TTL
@@ -426,7 +584,7 @@ impl CacheManager {
         &self,
         user_id: &str,
         session_data: &T,
-    ) -> ArbitrageResult<CacheResult>
+    ) -> ArbitrageResult<CacheResult<T>>
     where
         T: Serialize + Clone,
     {
@@ -441,7 +599,7 @@ impl CacheManager {
         exchange: &str,
         symbol: &str,
         data: &T,
-    ) -> ArbitrageResult<CacheResult>
+    ) -> ArbitrageResult<CacheResult<T>>
     where
         T: Serialize + Clone,
     {
@@ -455,7 +613,7 @@ impl CacheManager {
         &self,
         opportunity_id: &str,
         data: &T,
-    ) -> ArbitrageResult<CacheResult>
+    ) -> ArbitrageResult<CacheResult<T>>
     where
         T: Serialize + Clone,
     {
@@ -469,7 +627,7 @@ impl CacheManager {
         &self,
         analysis_id: &str,
         data: &T,
-    ) -> ArbitrageResult<CacheResult>
+    ) -> ArbitrageResult<CacheResult<T>>
     where
         T: Serialize + Clone,
     {
@@ -479,7 +637,11 @@ impl CacheManager {
     }
 
     /// Cache configuration data with long TTL
-    pub async fn cache_config<T>(&self, config_key: &str, data: &T) -> ArbitrageResult<CacheResult>
+    pub async fn cache_config<T>(
+        &self,
+        config_key: &str,
+        data: &T,
+    ) -> ArbitrageResult<CacheResult<T>>
     where
         T: Serialize + Clone,
     {
@@ -520,7 +682,7 @@ impl CacheManager {
                     }
                     // Exponential backoff
                     let delay_ms = self.config.retry_delay_ms * (2_u64.pow(attempt));
-                    sleep_ms_free(delay_ms).await;
+                    sleep_ms(delay_ms).await;
                 }
             }
         }
@@ -531,7 +693,7 @@ impl CacheManager {
     async fn set_with_retry(
         &self,
         key: &str,
-        value: &str,
+        value: &String,
         ttl_seconds: Option<u64>,
     ) -> ArbitrageResult<()> {
         for attempt in 0..=self.config.retry_attempts {
@@ -553,7 +715,7 @@ impl CacheManager {
                     }
                     // Exponential backoff
                     let delay_ms = self.config.retry_delay_ms * (2_u64.pow(attempt));
-                    sleep_ms_free(delay_ms).await;
+                    sleep_ms(delay_ms).await;
                 }
             }
         }
@@ -574,7 +736,7 @@ impl CacheManager {
                     }
                     // Exponential backoff
                     let delay_ms = self.config.retry_delay_ms * (2_u64.pow(attempt));
-                    sleep_ms_free(delay_ms).await;
+                    sleep_ms(delay_ms).await;
                 }
             }
         }
@@ -674,20 +836,17 @@ mod tests {
     #[test]
     fn test_cache_result_creation() {
         let result = CacheResult {
-            success: true,
-            key: "test_key".to_string(),
-            operation: CacheOperation::Set,
-            execution_time_ms: 25,
-            cache_hit: false,
-            data_size_bytes: 1024,
+            data: Some("test_data".to_string()),
+            hit: true,
+            source: CacheSource::Memory,
+            latency_ms: 0.0,
+            compression_ratio: None,
         };
 
-        assert!(result.success);
-        assert_eq!(result.key, "test_key");
-        assert_eq!(result.operation, CacheOperation::Set);
-        assert_eq!(result.execution_time_ms, 25);
-        assert!(!result.cache_hit);
-        assert_eq!(result.data_size_bytes, 1024);
+        assert!(result.hit);
+        assert_eq!(result.source, CacheSource::Memory);
+        assert_eq!(result.latency_ms, 0.0);
+        assert!(result.data.is_some());
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! overhead through delta calculation, compression, and merkle tree optimization.
 
 use crate::services::core::infrastructure::shared_types::ComponentHealth;
-use crate::utils::{ArbitrageError, ArbitrageResult};
+use crate::utils::ArbitrageResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,8 +45,9 @@ impl DiffCalculator {
         new_data: &[u8],
     ) -> ArbitrageResult<DiffResult> {
         let operations = self.compute_diff_operations(old_data, new_data)?;
-        
-        let diff_size = operations.iter()
+
+        let diff_size = operations
+            .iter()
             .map(|op| match op {
                 DiffOperation::Insert { data, .. } => data.len(),
                 DiffOperation::Delete { length, .. } => *length,
@@ -67,9 +68,13 @@ impl DiffCalculator {
     }
 
     /// Compute diff operations
-    fn compute_diff_operations(&self, old_data: &[u8], new_data: &[u8]) -> ArbitrageResult<Vec<DiffOperation>> {
+    fn compute_diff_operations(
+        &self,
+        old_data: &[u8],
+        new_data: &[u8],
+    ) -> ArbitrageResult<Vec<DiffOperation>> {
         let mut operations = Vec::new();
-        
+
         // Simple implementation - in production this would use more sophisticated algorithms
         if old_data != new_data {
             if !old_data.is_empty() {
@@ -78,7 +83,7 @@ impl DiffCalculator {
                     length: old_data.len(),
                 });
             }
-            
+
             if !new_data.is_empty() {
                 operations.push(DiffOperation::Insert {
                     offset: 0,
@@ -86,7 +91,7 @@ impl DiffCalculator {
                 });
             }
         }
-        
+
         Ok(operations)
     }
 }
@@ -101,7 +106,7 @@ impl DeltaSync {
     /// Create new delta sync engine
     pub fn new(config: &DiffEngineConfig) -> Self {
         let calculator = DiffCalculator::new(config);
-        
+
         Self {
             config: config.clone(),
             calculator,
@@ -114,22 +119,21 @@ impl DeltaSync {
         diff_result: &DiffResult,
     ) -> ArbitrageResult<SyncPayload> {
         let mut payload_data = Vec::new();
-        
+
         // Serialize diff operations
         for operation in &diff_result.operations {
             payload_data.extend_from_slice(&self.serialize_operation(operation)?);
         }
 
-        let compression = if self.config.enable_compression && 
-                            payload_data.len() > self.config.compression_threshold_bytes as usize {
+        let compression = if self.config.enable_compression
+            && payload_data.len() > self.config.compression_threshold_bytes as usize
+        {
             PayloadCompression::Enabled {
                 original_size: payload_data.len() as u64,
                 compressed_data: self.compress_data(&payload_data)?,
             }
         } else {
-            PayloadCompression::Disabled {
-                data: payload_data,
-            }
+            PayloadCompression::Disabled { data: payload_data }
         };
 
         Ok(SyncPayload {
@@ -148,9 +152,9 @@ impl DeltaSync {
     ) -> ArbitrageResult<Vec<u8>> {
         // Extract payload data
         let payload_data = match &payload.compression {
-            PayloadCompression::Enabled { compressed_data, .. } => {
-                self.decompress_data(compressed_data)?
-            },
+            PayloadCompression::Enabled {
+                compressed_data, ..
+            } => self.decompress_data(compressed_data)?,
             PayloadCompression::Disabled { data } => data.clone(),
         };
 
@@ -174,24 +178,28 @@ impl DeltaSync {
     }
 
     /// Apply operations to data
-    fn apply_operations(&self, base_data: &[u8], operations: &[DiffOperation]) -> ArbitrageResult<Vec<u8>> {
+    fn apply_operations(
+        &self,
+        base_data: &[u8],
+        operations: &[DiffOperation],
+    ) -> ArbitrageResult<Vec<u8>> {
         let mut result = base_data.to_vec();
-        
+
         for operation in operations {
             match operation {
                 DiffOperation::Insert { offset, data } => {
                     result.splice(*offset..*offset, data.clone());
-                },
+                }
                 DiffOperation::Delete { offset, length } => {
                     let end = (*offset + *length).min(result.len());
                     result.drain(*offset..end);
-                },
+                }
                 DiffOperation::Copy { .. } => {
                     // Copy operations would be implemented here
-                },
+                }
             }
         }
-        
+
         Ok(result)
     }
 
@@ -239,41 +247,46 @@ impl MerkleTree {
     /// Build tree from data chunks
     pub fn build_from_chunks(&mut self, chunks: Vec<Vec<u8>>) -> ArbitrageResult<String> {
         let mut level_hashes = Vec::new();
-        
+
         // Create leaf nodes
         for (i, chunk) in chunks.into_iter().enumerate() {
             let hash = self.hash_data(&chunk);
             let node_id = format!("leaf_{}", i);
-            
-            self.nodes.insert(node_id.clone(), MerkleNode {
-                hash: hash.clone(),
-                children: Vec::new(),
-                data_chunk: Some(chunk),
-            });
-            
+
+            self.nodes.insert(
+                node_id.clone(),
+                MerkleNode {
+                    hash: hash.clone(),
+                    children: Vec::new(),
+                    data_chunk: Some(chunk),
+                },
+            );
+
             level_hashes.push(hash);
         }
 
         // Build internal nodes
         while level_hashes.len() > 1 {
             let mut next_level = Vec::new();
-            
+
             for chunk in level_hashes.chunks(2) {
                 let combined_hash = if chunk.len() == 2 {
                     self.hash_string(&format!("{}{}", chunk[0], chunk[1]))
                 } else {
                     chunk[0].clone()
                 };
-                
+
                 next_level.push(combined_hash);
             }
-            
+
             level_hashes = next_level;
         }
 
-        let root_hash = level_hashes.into_iter().next()
+        let root_hash = level_hashes
+            .into_iter()
+            .next()
             .unwrap_or_else(|| "empty".to_string());
-        
+
         self.root_hash = Some(root_hash.clone());
         Ok(root_hash)
     }
@@ -394,8 +407,14 @@ impl DiffEngine {
             is_healthy: true,
             last_check: chrono::Utc::now().timestamp_millis() as u64,
             error_count: 0,
+            warning_count: 0,
             uptime_seconds: 0,
             performance_score: 1.0,
+            resource_usage_percent: 0.0,
+            last_error: None,
+            last_warning: None,
+            component_name: "diff_engine".to_string(),
+            version: "1.0.0".to_string(),
         }));
 
         Ok(Self {
@@ -464,12 +483,12 @@ impl DiffEngine {
     /// Update metrics
     async fn update_metrics(&self, diff_result: &DiffResult, duration_ms: u64) {
         let mut metrics = self.metrics.lock().await;
-        
+
         metrics.total_diffs_calculated += 1;
         metrics.total_bytes_processed += diff_result.diff_size_bytes;
-        metrics.avg_compression_ratio = 
+        metrics.avg_compression_ratio =
             (metrics.avg_compression_ratio + diff_result.compression_ratio) / 2.0;
-        metrics.avg_processing_time_ms = 
+        metrics.avg_processing_time_ms =
             (metrics.avg_processing_time_ms + duration_ms as f64) / 2.0;
         metrics.last_operation_time = chrono::Utc::now().timestamp_millis() as u64;
     }
@@ -479,15 +498,9 @@ impl DiffEngine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DiffOperation {
     /// Insert data at offset
-    Insert {
-        offset: usize,
-        data: Vec<u8>,
-    },
+    Insert { offset: usize, data: Vec<u8> },
     /// Delete data at offset
-    Delete {
-        offset: usize,
-        length: usize,
-    },
+    Delete { offset: usize, length: usize },
     /// Copy data from source
     Copy {
         src_offset: usize,
@@ -544,9 +557,7 @@ pub enum PayloadCompression {
         compressed_data: Vec<u8>,
     },
     /// Compression disabled
-    Disabled {
-        data: Vec<u8>,
-    },
+    Disabled { data: Vec<u8> },
 }
 
 /// Diff engine metrics
@@ -562,6 +573,32 @@ pub struct DiffMetrics {
     pub avg_processing_time_ms: f64,
     /// Last operation timestamp
     pub last_operation_time: u64,
+}
+
+/// Diff engine health status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffEngineHealth {
+    /// Overall health status
+    pub is_healthy: bool,
+    /// Last health check timestamp
+    pub last_check: u64,
+    /// Error count
+    pub error_count: u64,
+    /// Processing success rate
+    pub processing_success_rate: f64,
+    /// Average processing time
+    pub avg_processing_time_ms: f64,
+}
+
+/// Diff engine metrics for monitoring
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffEngineMetrics {
+    /// Diff metrics
+    pub diff_metrics: DiffMetrics,
+    /// Health status
+    pub health: DiffEngineHealth,
+    /// Timestamp when metrics were collected
+    pub collected_at: u64,
 }
 
 /// Data diff for structured comparison
@@ -597,4 +634,4 @@ impl Default for DiffMetrics {
             last_operation_time: 0,
         }
     }
-} 
+}

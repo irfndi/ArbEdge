@@ -7,6 +7,7 @@ pub mod health_monitor;
 pub mod metrics_collection_engine;
 pub mod metrics_collector;
 pub mod observability_coordinator;
+pub mod opportunity_monitor;
 pub mod performance_monitoring_dashboard;
 pub mod real_time_alerting_system;
 pub mod real_time_health_monitor;

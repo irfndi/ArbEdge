@@ -803,6 +803,320 @@ impl MetricsCollector {
 
         Ok(cleaned_count)
     }
+
+    /// Collect cache-specific metrics for monitoring caching improvements
+    pub async fn collect_cache_metric(
+        &self,
+        cache_operation: CacheOperation,
+        cache_type: &str,
+        endpoint: &str,
+        was_hit: bool,
+        response_time_ms: u64,
+        cache_size_bytes: Option<u64>,
+    ) -> ArbitrageResult<()> {
+        // Collect cache hit/miss metrics
+        let hit_miss_metric = MetricValue::new(if was_hit { 1.0 } else { 0.0 })
+            .with_tag("cache_type".to_string(), cache_type.to_string())
+            .with_tag("endpoint".to_string(), endpoint.to_string())
+            .with_tag(
+                "operation".to_string(),
+                cache_operation.as_str().to_string(),
+            );
+
+        self.collect_metric(
+            "cache_hit_rate".to_string(),
+            MetricType::Percentage,
+            "cache_system".to_string(),
+            hit_miss_metric,
+        )
+        .await?;
+
+        // Collect cache response time
+        let response_time_metric = MetricValue::new(response_time_ms as f64)
+            .with_tag("cache_type".to_string(), cache_type.to_string())
+            .with_tag("endpoint".to_string(), endpoint.to_string())
+            .with_tag(
+                "hit_status".to_string(),
+                if was_hit { "hit" } else { "miss" }.to_string(),
+            );
+
+        self.collect_metric(
+            "cache_response_time".to_string(),
+            MetricType::Timer,
+            "cache_system".to_string(),
+            response_time_metric,
+        )
+        .await?;
+
+        // Collect cache size metrics if provided
+        if let Some(size_bytes) = cache_size_bytes {
+            let cache_size_metric = MetricValue::new(size_bytes as f64)
+                .with_tag("cache_type".to_string(), cache_type.to_string());
+
+            self.collect_metric(
+                "cache_size_bytes".to_string(),
+                MetricType::Gauge,
+                "cache_system".to_string(),
+                cache_size_metric,
+            )
+            .await?;
+        }
+
+        // Collect operation-specific counters
+        let operation_counter = MetricValue::new(1.0)
+            .with_tag("cache_type".to_string(), cache_type.to_string())
+            .with_tag(
+                "operation".to_string(),
+                cache_operation.as_str().to_string(),
+            )
+            .with_tag(
+                "result".to_string(),
+                if was_hit { "hit" } else { "miss" }.to_string(),
+            );
+
+        self.collect_metric(
+            format!("cache_operations_{}", cache_operation.as_str()),
+            MetricType::Counter,
+            "cache_system".to_string(),
+            operation_counter,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Collect Cloudflare-specific metrics for subrequest monitoring
+    pub async fn collect_cloudflare_metric(
+        &self,
+        request_type: CloudflareRequestType,
+        endpoint: &str,
+        was_cached_by_cloudflare: bool,
+        response_time_ms: u64,
+        bandwidth_bytes: u64,
+    ) -> ArbitrageResult<()> {
+        // Track Cloudflare caching effectiveness
+        let cf_cache_metric = MetricValue::new(if was_cached_by_cloudflare { 1.0 } else { 0.0 })
+            .with_tag("endpoint".to_string(), endpoint.to_string())
+            .with_tag(
+                "request_type".to_string(),
+                request_type.as_str().to_string(),
+            );
+
+        self.collect_metric(
+            "cloudflare_cache_hit_rate".to_string(),
+            MetricType::Percentage,
+            "cloudflare_edge".to_string(),
+            cf_cache_metric,
+        )
+        .await?;
+
+        // Track bandwidth usage
+        let bandwidth_metric = MetricValue::new(bandwidth_bytes as f64)
+            .with_tag("endpoint".to_string(), endpoint.to_string())
+            .with_tag(
+                "cached_status".to_string(),
+                if was_cached_by_cloudflare {
+                    "cached"
+                } else {
+                    "uncached"
+                }
+                .to_string(),
+            );
+
+        self.collect_metric(
+            "cloudflare_bandwidth_bytes".to_string(),
+            MetricType::Counter,
+            "cloudflare_edge".to_string(),
+            bandwidth_metric,
+        )
+        .await?;
+
+        // Track response times by cache status
+        let response_time_metric = MetricValue::new(response_time_ms as f64)
+            .with_tag("endpoint".to_string(), endpoint.to_string())
+            .with_tag(
+                "cache_status".to_string(),
+                if was_cached_by_cloudflare {
+                    "hit"
+                } else {
+                    "miss"
+                }
+                .to_string(),
+            );
+
+        self.collect_metric(
+            "cloudflare_response_time".to_string(),
+            MetricType::Timer,
+            "cloudflare_edge".to_string(),
+            response_time_metric,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Generate cache performance report
+    pub async fn generate_cache_performance_report(
+        &self,
+    ) -> ArbitrageResult<CachePerformanceReport> {
+        let cache_metrics = self.get_component_metrics("cache_system").await;
+        let cloudflare_metrics = self.get_component_metrics("cloudflare_edge").await;
+
+        let mut report = CachePerformanceReport {
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            overall_cache_hit_rate: 0.0,
+            cloudflare_hit_rate: 0.0,
+            average_response_time_ms: 0.0,
+            total_bandwidth_saved_bytes: 0,
+            cache_type_performance: HashMap::new(),
+            endpoint_performance: HashMap::new(),
+            recommendations: Vec::new(),
+        };
+
+        // Calculate overall cache hit rate
+        if let Some(hit_rate_data) = cache_metrics.get("cache_hit_rate") {
+            if let Some(aggregated) = &hit_rate_data.aggregated_value {
+                report.overall_cache_hit_rate = aggregated.avg;
+            }
+        }
+
+        // Calculate Cloudflare hit rate
+        if let Some(cf_hit_rate_data) = cloudflare_metrics.get("cloudflare_cache_hit_rate") {
+            if let Some(aggregated) = &cf_hit_rate_data.aggregated_value {
+                report.cloudflare_hit_rate = aggregated.avg;
+            }
+        }
+
+        // Calculate average response time
+        if let Some(response_time_data) = cache_metrics.get("cache_response_time") {
+            if let Some(aggregated) = &response_time_data.aggregated_value {
+                report.average_response_time_ms = aggregated.avg;
+            }
+        }
+
+        // Generate recommendations based on performance
+        report.recommendations = self.generate_cache_recommendations(&report).await;
+
+        Ok(report)
+    }
+
+    /// Generate cache optimization recommendations
+    async fn generate_cache_recommendations(&self, report: &CachePerformanceReport) -> Vec<String> {
+        let mut recommendations = Vec::new();
+
+        if report.overall_cache_hit_rate < 70.0 {
+            recommendations
+                .push("Consider increasing cache TTL for stable data endpoints".to_string());
+            recommendations.push(
+                "Implement cache warming strategies for frequently accessed data".to_string(),
+            );
+        }
+
+        if report.cloudflare_hit_rate < 60.0 {
+            recommendations.push(
+                "Review and optimize Cache-Control headers for better Cloudflare caching"
+                    .to_string(),
+            );
+            recommendations
+                .push("Consider implementing more aggressive edge caching strategies".to_string());
+        }
+
+        if report.average_response_time_ms > 1000.0 {
+            recommendations.push(
+                "Optimize slow endpoints - consider pre-computing or additional caching layers"
+                    .to_string(),
+            );
+        }
+
+        if recommendations.is_empty() {
+            recommendations.push("Cache performance is within acceptable ranges".to_string());
+        }
+
+        recommendations
+    }
+}
+
+/// Cache operation types for monitoring
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheOperation {
+    Get,
+    Set,
+    Delete,
+    Invalidate,
+    Warm,
+    Expire,
+}
+
+impl CacheOperation {
+    pub fn as_str(&self) -> &str {
+        match self {
+            CacheOperation::Get => "get",
+            CacheOperation::Set => "set",
+            CacheOperation::Delete => "delete",
+            CacheOperation::Invalidate => "invalidate",
+            CacheOperation::Warm => "warm",
+            CacheOperation::Expire => "expire",
+        }
+    }
+}
+
+/// Cloudflare request types for monitoring
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloudflareRequestType {
+    ApiRequest,
+    StaticAsset,
+    Image,
+    Document,
+    Other,
+}
+
+impl CloudflareRequestType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            CloudflareRequestType::ApiRequest => "api_request",
+            CloudflareRequestType::StaticAsset => "static_asset",
+            CloudflareRequestType::Image => "image",
+            CloudflareRequestType::Document => "document",
+            CloudflareRequestType::Other => "other",
+        }
+    }
+}
+
+/// Cache performance report structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachePerformanceReport {
+    pub timestamp: u64,
+    pub overall_cache_hit_rate: f64,
+    pub cloudflare_hit_rate: f64,
+    pub average_response_time_ms: f64,
+    pub total_bandwidth_saved_bytes: u64,
+    pub cache_type_performance: HashMap<String, CacheTypePerformance>,
+    pub endpoint_performance: HashMap<String, EndpointPerformance>,
+    pub recommendations: Vec<String>,
+}
+
+/// Cache type performance metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheTypePerformance {
+    pub cache_type: String,
+    pub hit_rate: f64,
+    pub average_response_time_ms: f64,
+    pub total_requests: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+}
+
+/// Endpoint-specific performance metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EndpointPerformance {
+    pub endpoint: String,
+    pub hit_rate: f64,
+    pub average_response_time_ms: f64,
+    pub total_requests: u64,
+    pub cloudflare_hit_rate: f64,
+    pub bandwidth_usage_bytes: u64,
 }
 
 #[cfg(test)]

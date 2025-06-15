@@ -4,8 +4,10 @@ use crate::types::{
     ArbitrageOpportunity, ChatContext, ExchangeCredentials, ExchangeIdEnum, FundingRateInfo,
     TechnicalOpportunity, Ticker,
 };
+use crate::utils::feature_flags;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use worker::console_log;
 
 /// Context for opportunity processing (Personal, Group, or Global)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,26 +53,96 @@ pub struct OpportunityConfig {
 
 impl Default for OpportunityConfig {
     fn default() -> Self {
+        // Use feature flags for dynamic configuration with production-ready fallbacks
+        let min_rate_threshold = feature_flags::get_numeric_feature_value(
+            "opportunity_engine.min_rate_threshold",
+            0.05, // Lower default threshold: 0.05%
+        );
+
+        console_log!(
+            "🔧 OPPORTUNITY_CONFIG - Min rate threshold: {:.4}% (from feature flags)",
+            min_rate_threshold
+        );
+
         Self {
-            symbols: vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()],
+            symbols: vec!["BTC/USDT".to_string(), "ETH/USDT".to_string()],
             max_opportunities: 100,
             enable_ai: true,
             enable_caching: true,
             cache_ttl_seconds: 300,
             min_confidence_threshold: 0.7,
             max_risk_level: 0.8,
-            default_pairs: vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()],
-            min_rate_difference: 0.1, // 0.1% (in percentage scale to match calculate_price_difference_percent)
+            default_pairs: vec![
+                "BTC/USDT".to_string(),
+                "ETH/USDT".to_string(),
+                "BNB/USDT".to_string(),
+                "SOL/USDT".to_string(),
+                "ADA/USDT".to_string(),
+            ],
+            min_rate_difference: min_rate_threshold,
             monitored_exchanges: vec![
-                ExchangeIdEnum::Binance,
+                ExchangeIdEnum::Coinbase, // Prioritize Coinbase first per user request
+                ExchangeIdEnum::OKX,      // OKX second
+                ExchangeIdEnum::Binance,  // Binance third
                 ExchangeIdEnum::Bybit,
-                ExchangeIdEnum::OKX,
-                ExchangeIdEnum::Coinbase,
-                ExchangeIdEnum::Kraken,
+                ExchangeIdEnum::Bitget,
             ],
             opportunity_ttl_minutes: 15,
             max_participants_per_opportunity: 10,
         }
+    }
+}
+
+impl OpportunityConfig {
+    /// Create config with feature flag integration
+    pub fn with_feature_flags() -> Self {
+        Self::default()
+    }
+
+    /// Update minimum rate difference from feature flags
+    pub fn update_min_rate_difference(&mut self) {
+        self.min_rate_difference = feature_flags::get_numeric_feature_value(
+            "opportunity_engine.min_rate_threshold",
+            self.min_rate_difference,
+        );
+        console_log!(
+            "🔄 OPPORTUNITY_CONFIG - Updated min rate threshold: {:.4}%",
+            self.min_rate_difference
+        );
+    }
+
+    /// Get fault-tolerant configuration for production
+    pub fn production_config() -> Self {
+        let config = Self {
+            cache_ttl_seconds: 60,         // Longer cache for production
+            max_opportunities: 50,         // Reasonable limit for production
+            min_confidence_threshold: 0.6, // Lower threshold for more opportunities
+            monitored_exchanges: vec![
+                ExchangeIdEnum::Coinbase,
+                ExchangeIdEnum::OKX,
+                ExchangeIdEnum::Binance,
+                ExchangeIdEnum::Bybit,
+                ExchangeIdEnum::Bitget,
+            ],
+            ..Default::default()
+        };
+
+        console_log!("🏭 OPPORTUNITY_CONFIG - Production configuration enabled");
+        config
+    }
+
+    /// Validate configuration for production readiness
+    pub fn validate(&self) -> Result<(), String> {
+        if self.min_rate_difference < 0.01 {
+            return Err("Minimum rate difference too low for production".to_string());
+        }
+        if self.monitored_exchanges.is_empty() {
+            return Err("No monitored exchanges configured".to_string());
+        }
+        if self.max_opportunities == 0 {
+            return Err("Max opportunities must be greater than 0".to_string());
+        }
+        Ok(())
     }
 }
 
@@ -133,9 +205,9 @@ pub struct OpportunityConstants;
 
 impl OpportunityConstants {
     pub const DEFAULT_SYMBOLS: &'static [&'static str] =
-        &["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "SOLUSDT"];
+        &["BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "SOL/USDT"];
 
-    pub const MIN_ARBITRAGE_THRESHOLD: f64 = 0.001; // 0.1%
+    pub const MIN_ARBITRAGE_THRESHOLD: f64 = 0.05; // Lowered to 0.05% for production
     pub const MIN_VOLUME_THRESHOLD: f64 = 100000.0;
     pub const HIGH_VOLUME_THRESHOLD: f64 = 1000000.0;
     pub const FUNDING_RATE_THRESHOLD: f64 = 0.01; // 1%
@@ -161,7 +233,7 @@ impl OpportunityUtils {
             .collect()
     }
 
-    /// Calculate price difference percentage
+    /// Calculate price difference percentage with enhanced logging
     pub fn calculate_price_difference_percent(price_a: f64, price_b: f64) -> f64 {
         let result = if price_a > 0.0 {
             ((price_b - price_a).abs() / price_a) * 100.0
@@ -169,14 +241,17 @@ impl OpportunityUtils {
             0.0
         };
 
-        // Log price difference calculation
-        log::debug!(
-            "🧮 PRICE CALC DEBUG - Price A: ${:.2}, Price B: ${:.2}, Diff: ${:.2}, Result: {:.4}%",
-            price_a,
-            price_b,
-            (price_b - price_a).abs(),
-            result
-        );
+        // Enhanced logging for production debugging
+        if feature_flags::is_feature_enabled("opportunity_engine.enhanced_logging").unwrap_or(false)
+        {
+            console_log!(
+                "🧮 PRICE_CALC - Price A: ${:.4}, Price B: ${:.4}, Diff: ${:.4}, Result: {:.6}%",
+                price_a,
+                price_b,
+                (price_b - price_a).abs(),
+                result
+            );
+        }
 
         result
     }
@@ -193,145 +268,191 @@ impl OpportunityUtils {
         }
     }
 
-    /// Determine if price difference is significant for arbitrage
+    /// Determine if price difference is significant for arbitrage with feature flag support
     pub fn is_arbitrage_significant(price_diff_percent: f64) -> bool {
-        // value already expressed in percent
-        const MIN_ARBITRAGE_THRESHOLD_PERCENT: f64 = 0.1; // 0.1%
-        price_diff_percent >= MIN_ARBITRAGE_THRESHOLD_PERCENT
+        let min_threshold = feature_flags::get_numeric_feature_value(
+            "opportunity_engine.min_rate_threshold",
+            OpportunityConstants::MIN_ARBITRAGE_THRESHOLD,
+        );
+
+        let is_significant = price_diff_percent >= min_threshold;
+
+        if feature_flags::is_feature_enabled("opportunity_engine.enhanced_logging").unwrap_or(false)
+        {
+            console_log!(
+                "🎯 ARBITRAGE_CHECK - Diff: {:.6}%, Threshold: {:.6}%, Significant: {}",
+                price_diff_percent,
+                min_threshold,
+                is_significant
+            );
+        }
+
+        is_significant
     }
 
-    /// Determine if volume is sufficient for trading
+    /// Enhanced volume check with feature flag support
     pub fn is_volume_sufficient(volume: f64) -> bool {
-        volume >= OpportunityConstants::MIN_VOLUME_THRESHOLD
+        let min_volume = feature_flags::get_numeric_feature_value(
+            "opportunity_engine.min_volume_threshold",
+            OpportunityConstants::MIN_VOLUME_THRESHOLD,
+        );
+
+        volume >= min_volume
     }
 
-    /// Calculate confidence score based on multiple factors
+    /// Calculate base confidence with enhanced metrics
     pub fn calculate_base_confidence(
         volume: f64,
         price_change_percent: f64,
         funding_rate: Option<f64>,
     ) -> f64 {
-        let mut score: f64 = 0.5; // Base score
+        let mut confidence: f64 = 0.5; // Base confidence
 
-        // Volume factor
+        // Volume component
         if volume > OpportunityConstants::HIGH_VOLUME_THRESHOLD {
-            score += 0.2;
+            confidence += 0.2;
         } else if volume > OpportunityConstants::MIN_VOLUME_THRESHOLD {
-            score += 0.1;
+            confidence += 0.1;
         }
 
-        // Funding rate factor
-        if let Some(fr) = funding_rate {
-            if fr.abs() > OpportunityConstants::FUNDING_RATE_THRESHOLD {
-                score += 0.2;
+        // Price momentum component
+        if price_change_percent.abs() > OpportunityConstants::PRICE_MOMENTUM_THRESHOLD {
+            confidence += 0.15;
+        }
+
+        // Funding rate component
+        if let Some(rate) = funding_rate {
+            if rate.abs() > OpportunityConstants::FUNDING_RATE_THRESHOLD {
+                confidence += 0.1;
             }
         }
 
-        // Price momentum factor
-        if price_change_percent.abs() > OpportunityConstants::PRICE_MOMENTUM_THRESHOLD {
-            score += 0.1;
-        }
-
-        score.min(1.0_f64)
+        // Cap at 0.95 to maintain realistic confidence
+        confidence.min(0.95)
     }
 
-    /// Generate unique opportunity ID
+    /// Generate opportunity ID with enhanced entropy
     pub fn generate_opportunity_id(prefix: &str, user_id: &str, symbol: &str) -> String {
-        format!("{}_{}_{}_{}", prefix, user_id, symbol, uuid::Uuid::new_v4())
+        let timestamp = chrono::Utc::now().timestamp_millis();
+        let hash = md5::compute(format!("{}{}{}{}", prefix, user_id, symbol, timestamp));
+        format!("{}_{:x}", prefix, hash)
     }
 
-    /// Apply delay to opportunity timestamps
+    /// Apply delay to arbitrage opportunities for production safety
     pub fn apply_delay_to_arbitrage(
-        opportunities: &mut Vec<ArbitrageOpportunity>,
+        opportunities: &mut [ArbitrageOpportunity],
         delay_seconds: u64,
     ) {
-        let delay_ms = delay_seconds * 1000;
-        for opportunity in opportunities {
-            opportunity.timestamp += delay_ms;
+        let delay_millis = delay_seconds * 1000;
+        for opportunity in opportunities.iter_mut() {
+            if let Some(expires_at) = opportunity.expires_at {
+                opportunity.expires_at = Some(expires_at + delay_millis);
+            }
         }
     }
 
-    /// Apply delay to technical opportunity timestamps
+    /// Apply delay to technical opportunities for production safety
     pub fn apply_delay_to_technical(
-        opportunities: &mut Vec<TechnicalOpportunity>,
+        opportunities: &mut [TechnicalOpportunity],
         delay_seconds: u64,
     ) {
-        let delay_ms = delay_seconds * 1000;
-        for opportunity in opportunities {
-            opportunity.timestamp += delay_ms;
+        let delay_millis = delay_seconds * 1000;
+        for opportunity in opportunities.iter_mut() {
+            opportunity.expires_at = Some(opportunity.expires_at.unwrap_or(0) + delay_millis);
         }
     }
 
-    #[allow(clippy::ptr_arg)]
-    pub fn sort_arbitrage_by_profit(opportunities: &mut Vec<ArbitrageOpportunity>) {
+    /// Sort arbitrage opportunities by profit with enhanced prioritization
+    pub fn sort_arbitrage_by_profit(opportunities: &mut [ArbitrageOpportunity]) {
         opportunities.sort_by(|a, b| {
-            let a_profit = a.potential_profit_value.unwrap_or(0.0);
-            let b_profit = b.potential_profit_value.unwrap_or(0.0);
-            b_profit
-                .partial_cmp(&a_profit)
+            // Primary: profit percentage (descending)
+            let profit_cmp = b
+                .profit_percentage
+                .partial_cmp(&a.profit_percentage)
+                .unwrap_or(std::cmp::Ordering::Equal);
+
+            if profit_cmp != std::cmp::Ordering::Equal {
+                return profit_cmp;
+            }
+
+            // Secondary: confidence score (descending)
+            b.confidence_score
+                .partial_cmp(&a.confidence_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
-    /// Sort technical opportunities by confidence
-    #[allow(clippy::ptr_arg)]
-    pub fn sort_technical_by_confidence(opportunities: &mut Vec<TechnicalOpportunity>) {
+    /// Sort technical opportunities by confidence score (descending)
+    pub fn sort_technical_by_confidence(opportunities: &mut [TechnicalOpportunity]) {
         opportunities.sort_by(|a, b| {
-            b.confidence
+            // Primary: confidence score (descending)
+            let confidence_cmp = b
+                .confidence
                 .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal);
+
+            if confidence_cmp != std::cmp::Ordering::Equal {
+                return confidence_cmp;
+            }
+
+            // Secondary: expected return (descending)
+            b.expected_return_percentage
+                .partial_cmp(&a.expected_return_percentage)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
-    /// Merge and deduplicate arbitrage opportunities
+    /// Merge arbitrage opportunities with deduplication
     pub fn merge_arbitrage_opportunities(
         primary: Vec<ArbitrageOpportunity>,
         secondary: Vec<ArbitrageOpportunity>,
         max_count: usize,
     ) -> Vec<ArbitrageOpportunity> {
         let mut merged = primary;
-        merged.extend(secondary);
 
-        // Remove duplicates based on symbol and exchange pair
-        merged.sort_by(|a, b| {
-            let a_key = format!("{}_{:?}_{:?}", a.pair, a.long_exchange, a.short_exchange);
-            let b_key = format!("{}_{:?}_{:?}", b.pair, b.long_exchange, b.short_exchange);
-            a_key.cmp(&b_key)
-        });
-        merged.dedup_by(|a, b| {
-            a.pair == b.pair
-                && a.long_exchange == b.long_exchange
-                && a.short_exchange == b.short_exchange
-        });
+        // Add secondary opportunities that don't duplicate primary ones
+        for secondary_opp in secondary {
+            let is_duplicate = merged.iter().any(|primary_opp| {
+                primary_opp.pair == secondary_opp.pair
+                    && primary_opp.long_exchange == secondary_opp.long_exchange
+                    && primary_opp.short_exchange == secondary_opp.short_exchange
+            });
 
-        // Sort by profit and limit
+            if !is_duplicate {
+                merged.push(secondary_opp);
+            }
+        }
+
+        // Sort and limit
         Self::sort_arbitrage_by_profit(&mut merged);
         merged.truncate(max_count);
-
         merged
     }
 
-    /// Merge and deduplicate technical opportunities
+    /// Merge technical opportunities with deduplication
     pub fn merge_technical_opportunities(
         primary: Vec<TechnicalOpportunity>,
         secondary: Vec<TechnicalOpportunity>,
         max_count: usize,
     ) -> Vec<TechnicalOpportunity> {
         let mut merged = primary;
-        merged.extend(secondary);
 
-        // Remove duplicates based on symbol and exchange
-        merged.sort_by(|a, b| {
-            let a_key = format!("{}_{:?}", a.pair, a.exchanges);
-            let b_key = format!("{}_{:?}", b.pair, b.exchanges);
-            a_key.cmp(&b_key)
-        });
-        merged.dedup_by(|a, b| a.pair == b.pair && a.exchanges == b.exchanges);
+        // Add secondary opportunities that don't duplicate primary ones
+        for secondary_opp in secondary {
+            let is_duplicate = merged.iter().any(|primary_opp| {
+                primary_opp.pair == secondary_opp.pair
+                    && primary_opp.exchanges == secondary_opp.exchanges
+                    && primary_opp.signal_type == secondary_opp.signal_type
+            });
 
-        // Sort by confidence and limit
+            if !is_duplicate {
+                merged.push(secondary_opp);
+            }
+        }
+
+        // Sort and limit
         Self::sort_technical_by_confidence(&mut merged);
         merged.truncate(max_count);
-
         merged
     }
 }

@@ -556,6 +556,11 @@ impl DatabaseManager {
         &self.config
     }
 
+    /// Get the underlying D1Database instance
+    pub fn get_database(&self) -> Option<Arc<D1Database>> {
+        Some(self.db.clone())
+    }
+
     /// Get uptime in seconds
     pub fn get_uptime_seconds(&self) -> u64 {
         (current_timestamp_ms() - self.startup_time) / 1000
@@ -1244,12 +1249,11 @@ impl DatabaseManager {
 
         if let Some(existing_id) = existing_row_id {
             // Update in-place (rate diff, profit, timestamps)
-            let update_query = "UPDATE opportunities SET rate_difference = ?, net_rate_difference = ?, potential_profit_value = ?, profit_percentage = ?, long_rate = ?, short_rate = ?, timestamp = ?, detection_timestamp = ? WHERE id = ?";
+            let update_query = "UPDATE opportunities SET rate_difference = ?, net_rate_difference = ?, potential_profit_value = ?, long_rate = ?, short_rate = ?, timestamp = ?, detection_timestamp = ? WHERE id = ?";
             let update_params = vec![
                 JsValue::from_f64(opportunity.rate_difference),
                 JsValue::from_f64(opportunity.net_rate_difference.unwrap_or(0.0)),
                 JsValue::from_f64(opportunity.potential_profit_value.unwrap_or(0.0)),
-                JsValue::from_f64(opportunity.profit_percentage),
                 JsValue::from_f64(opportunity.long_rate.unwrap_or(0.0)),
                 JsValue::from_f64(opportunity.short_rate.unwrap_or(0.0)),
                 JsValue::from_f64(start_time as f64),
@@ -1285,20 +1289,20 @@ impl DatabaseManager {
             JsValue::from_str(opportunity.short_exchange.as_str()),
             JsValue::from_f64(opportunity.long_rate.unwrap_or(0.0)),
             JsValue::from_f64(opportunity.short_rate.unwrap_or(0.0)),
-            JsValue::from_f64(opportunity.profit_percentage),
+            JsValue::from_f64(opportunity.rate_difference),
             JsValue::from_f64(opportunity.net_rate_difference.unwrap_or(0.0)),
             JsValue::from_f64(opportunity.potential_profit_value.unwrap_or(0.0)),
             JsValue::from_str("price_arbitrage"),
             JsValue::from_str(&format!(
                 "{}% profit between {} and {}",
-                opportunity.profit_percentage,
+                opportunity.rate_difference,
                 opportunity.long_exchange.as_str(),
                 opportunity.short_exchange.as_str()
             )),
             JsValue::from_f64(start_time as f64),
             JsValue::from_f64(start_time as f64), // detection_timestamp
             JsValue::from_f64((start_time + 300000) as f64), // expiry_timestamp (5 min)
-            JsValue::from_f64(opportunity.profit_percentage * 10.0), // priority
+            JsValue::from_f64(opportunity.rate_difference * 10.0), // priority
             JsValue::from_f64(1000.0),
             JsValue::from_f64(0.0),
             JsValue::from_str("immediate"),

@@ -310,14 +310,15 @@ impl PatternAnalyzer {
         confidence: f64,
     ) -> u8 {
         let base_priority = match data_type {
-            DataType::MarketData => 9,
-            DataType::Opportunities => 8,
-            DataType::UserProfile => 7,
-            DataType::Session => 6,
-            DataType::AiResponse => 5,
-            DataType::Configuration => 4,
-            DataType::Analytics => 3,
-            DataType::Historical => 2,
+            DataType::MarketData => 10, // Highest priority for real-time market data
+            DataType::FundingRate => 8, // High priority for funding rates
+            DataType::Opportunities => 9, // Very high priority for trading opportunities
+            DataType::UserProfile => 7, // High priority for user data
+            DataType::Session => 6,     // Medium-high priority for session data
+            DataType::Configuration => 4, // Medium priority for configuration
+            DataType::AiResponse => 5,  // Medium priority for AI responses
+            DataType::Analytics => 3,   // Lower priority for analytics
+            DataType::Historical => 2,  // Low priority for historical data
             DataType::Generic => 1,
         };
 

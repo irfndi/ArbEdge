@@ -273,6 +273,30 @@ impl ArbitrageError {
             .with_status(408)
             .with_code("TIMEOUT_ERROR")
     }
+
+    pub fn data_error(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::DatabaseError, message)
+            .with_status(500)
+            .with_code("DATA_ERROR")
+    }
+
+    pub fn permission_denied(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Authorization, message)
+            .with_status(403)
+            .with_code("PERMISSION_DENIED")
+    }
+
+    pub fn resource_exhausted(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::RateLimit, message)
+            .with_status(429)
+            .with_code("RESOURCE_EXHAUSTED")
+    }
+
+    pub fn operation_not_supported(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::NotImplemented, message)
+            .with_status(501)
+            .with_code("OPERATION_NOT_SUPPORTED")
+    }
 }
 
 // Implement From conversions for common error types

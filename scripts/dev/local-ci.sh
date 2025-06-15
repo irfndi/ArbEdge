@@ -101,9 +101,9 @@ fi
 
 # Step 8: Test wrangler build (mirrors CI dry-run)
 print_step "Testing wrangler build (dry-run)"
-if command -v wrangler >/dev/null 2>&1; then
-    echo "Wrangler version: $(wrangler --version)"
-    if wrangler deploy --dry-run; then
+if pnpm wrangler --version >/dev/null 2>&1; then
+    echo "Wrangler version: $(pnpm wrangler --version)"
+    if pnpm wrangler deploy --dry-run; then
         print_success "Wrangler dry-run successful"
     else
         print_error "Wrangler dry-run failed"
@@ -111,7 +111,7 @@ if command -v wrangler >/dev/null 2>&1; then
     fi
 else
     print_warning "Wrangler not installed, skipping dry-run test"
-    print_warning "Install with: npm install -g wrangler@latest"
+    print_warning "Install with: pnpm add -D wrangler@latest"
 fi
 
 # Final summary

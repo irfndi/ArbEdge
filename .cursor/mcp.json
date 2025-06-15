@@ -6,7 +6,7 @@
         "env": {
           "OPENROUTER_API_KEY": "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",
           "MODEL": "gemini-2.5-flash-preview-05-20",
-          "MAX_TOKENS": 1000000,
+          "MAX_TOKENS": 128000,
           "TEMPERATURE": 0.2,
           "DEFAULT_SUBTASKS": 5,
           "DEFAULT_PRIORITY": "medium"

@@ -177,23 +177,36 @@ impl MarketDataIngestionService {
         self.analytics_engine = analytics_engine;
     }
 
-    /// Main ingestion method implementing hybrid data access pattern
+    /// Main ingestion method implementing optimized batch processing for better performance
     pub async fn ingest_market_data(&mut self) -> ArbitrageResult<Vec<MarketDataSnapshot>> {
         let start_time = chrono::Utc::now().timestamp_millis() as u64;
         let mut snapshots = Vec::new();
 
-        self.logger.info("Starting market data ingestion cycle");
+        self.logger
+            .info("Starting optimized batch market data ingestion cycle");
 
-        // TODO: Implement concurrent processing for better performance
-        // Current limitation: Rust borrowing rules prevent concurrent access to &mut self
-        // Future improvement: Refactor to use Arc<Mutex<Self>> or separate the mutable state
+        // Process in batches to reduce subrequests and improve performance
+        let pairs = self.config.monitored_pairs.clone();
+        let exchanges = self.config.monitored_exchanges.clone();
+        let batch_size = self.config.batch_size as usize;
 
-        // Ingest data for all monitored pairs and exchanges
-        for pair in &self.config.monitored_pairs.clone() {
-            for exchange in &self.config.monitored_exchanges.clone() {
+        // Create all exchange-pair combinations
+        let mut combinations = Vec::new();
+        for pair in &pairs {
+            for exchange in &exchanges {
+                combinations.push((exchange, pair.as_str()));
+            }
+        }
+
+        // Process combinations in batches
+        for batch in combinations.chunks(batch_size) {
+            let mut batch_snapshots = Vec::new();
+
+            // Process each item in the batch sequentially (but batches are processed efficiently)
+            for (exchange, pair) in batch {
                 match self.ingest_exchange_pair_data(exchange, pair).await {
                     Ok(snapshot) => {
-                        snapshots.push(snapshot);
+                        batch_snapshots.push(snapshot);
                         self.metrics.successful_requests += 1;
                     }
                     Err(e) => {
@@ -207,6 +220,14 @@ impl MarketDataIngestionService {
                     }
                 }
                 self.metrics.total_requests += 1;
+            }
+
+            // Add batch results to main collection
+            snapshots.extend(batch_snapshots);
+
+            // Small delay between batches to prevent rate limiting
+            if combinations.len() > batch_size {
+                worker::Delay::from(std::time::Duration::from_millis(100)).await;
             }
         }
 

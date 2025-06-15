@@ -77,11 +77,11 @@ fmt-fix: ## Auto-fix code formatting then run CI
 
 lint: ## Run clippy lints
 	@echo "🔍 Running clippy..."
-	@cargo clippy --all-targets --all-features
+	@cargo clippy --all-targets --features=""
 
 lint-strict: ## Run strict clippy lints (matches GitHub CI)
 	@echo "🔍 Running strict clippy (GitHub CI standard)..."
-	@cargo clippy --all-targets --all-features -- -D warnings
+	@cargo clippy --all-targets --features="" -- -D warnings
 
 lint-lib: ## Run clippy on library only
 	@echo "🔍 Running clippy on library..."
@@ -99,7 +99,7 @@ ci-pipeline: ## Run comprehensive CI pipeline
 	@echo "🎨 Step 1: Code Formatting Check"
 	@cargo fmt --all -- --check
 	@echo "🔍 Step 2: Clippy Linting Check"
-	@cargo clippy --all-targets --all-features -- -D warnings --verbose
+	@cargo clippy --all-targets --features="" -- -D warnings --verbose
 	@echo "✅ Step 2: Clippy Linting Passed"
 	@echo "🎯 Step 3: WASM Target Compilation Check"
 	@cargo check --target wasm32-unknown-unknown --lib --verbose

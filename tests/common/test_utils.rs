@@ -1,5 +1,5 @@
 use arb_edge::types::*;
-use arb_edge::utils::feature_flags::FeatureFlags;
+use arb_edge::utils::feature_flags::FeatureFlagManager;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -149,7 +149,7 @@ impl MockD1Database {
 pub struct TestEnvironment {
     pub d1_database: MockD1Database,
     pub kv_store: MockKvStore,
-    pub feature_flags: Arc<FeatureFlags>,
+    pub feature_flags: Arc<FeatureFlagManager>,
 }
 
 /// Setup a complete test environment with all necessary services
@@ -157,7 +157,7 @@ pub async fn setup_test_environment() -> TestEnvironment {
     // Create mock services for testing
     let d1_database = MockD1Database::new();
     let kv_store = MockKvStore::new();
-    let feature_flags = Arc::new(FeatureFlags::new(std::collections::HashMap::new()));
+    let feature_flags = Arc::new(FeatureFlagManager::new("test".to_string()));
 
     TestEnvironment {
         d1_database,

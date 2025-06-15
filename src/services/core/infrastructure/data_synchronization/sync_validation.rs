@@ -60,8 +60,7 @@ pub struct ValidationResult {
     pub recommendations: Vec<String>,
 }
 
-/// Validation metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Validation metrics for sync operations
 pub struct ValidationMetrics {
     /// Total validations performed
     pub total_validations: u64,
@@ -77,6 +76,38 @@ pub struct ValidationMetrics {
     pub validation_frequency: f64,
     /// Recent validation results
     pub recent_results: Vec<ValidationResult>,
+}
+
+/// Sync validation metrics for monitoring
+#[derive(Debug, Clone)]
+pub struct SyncValidationMetrics {
+    /// Total validations performed
+    pub total_validations: u64,
+    /// Successful validations
+    pub successful_validations: u64,
+    /// Failed validations
+    pub failed_validations: u64,
+    /// Average validation time in milliseconds
+    pub average_validation_time_ms: f64,
+    /// Number of validation rules
+    pub validation_rules_count: u64,
+    /// Timestamp when metrics were collected
+    pub collected_at: u64,
+}
+
+/// Sync validation health status
+#[derive(Debug, Clone)]
+pub struct SyncValidationHealth {
+    /// Overall health status
+    pub is_healthy: bool,
+    /// Last health check timestamp
+    pub last_check: u64,
+    /// Error count
+    pub error_count: u64,
+    /// Validation success rate
+    pub validation_success_rate: f64,
+    /// Average validation time
+    pub avg_validation_time_ms: f64,
 }
 
 /// Consistency report
@@ -165,7 +196,7 @@ impl ConsistencyChecker {
     pub async fn check_consistency(&self) -> ArbitrageResult<ConsistencyReport> {
         if !self.config.enable_consistency_checking {
             return Err(ArbitrageError::operation_not_supported(
-                "Consistency checking is disabled"
+                "Consistency checking is disabled",
             ));
         }
 
@@ -174,7 +205,7 @@ impl ConsistencyChecker {
 
         // Simulate consistency check
         let mut storage_systems = HashMap::new();
-        
+
         for system_name in ["KV", "D1", "R2"] {
             let status = StorageConsistencyStatus {
                 system_name: system_name.to_string(),
@@ -214,13 +245,13 @@ impl IntegrityValidator {
     pub async fn validate_zero_data_loss(&self) -> ArbitrageResult<ValidationResult> {
         if !self.config.enable_zero_data_loss_validation {
             return Err(ArbitrageError::operation_not_supported(
-                "Zero data loss validation is disabled"
+                "Zero data loss validation is disabled",
             ));
         }
 
         let validation_id = format!("zero_data_loss_{}", chrono::Utc::now().timestamp_millis());
         let mut metrics = HashMap::new();
-        
+
         metrics.insert("data_loss_percentage".to_string(), 0.0);
         metrics.insert("validation_duration_ms".to_string(), 2000.0);
 
@@ -251,13 +282,9 @@ impl SyncValidator {
         config: &SyncValidationConfig,
         _feature_flags: &super::SyncFeatureFlags,
     ) -> ArbitrageResult<Self> {
-        let consistency_checker = Arc::new(
-            ConsistencyChecker::new(config).await?
-        );
-        
-        let integrity_validator = Arc::new(
-            IntegrityValidator::new(config).await?
-        );
+        let consistency_checker = Arc::new(ConsistencyChecker::new(config).await?);
+
+        let integrity_validator = Arc::new(IntegrityValidator::new(config).await?);
 
         let health = Arc::new(RwLock::new(ComponentHealth {
             is_healthy: true,
@@ -295,15 +322,15 @@ impl SyncValidator {
                         success: report.consistent,
                         details: report.summary.clone(),
                         metrics: HashMap::new(),
-                        severity: if report.consistent { 
-                            ValidationSeverity::Info 
-                        } else { 
-                            ValidationSeverity::Error 
+                        severity: if report.consistent {
+                            ValidationSeverity::Info
+                        } else {
+                            ValidationSeverity::Error
                         },
                         recommendations: Vec::new(),
                     };
                     results.push(result);
-                },
+                }
                 Err(_) => {
                     // Handle error
                 }
@@ -345,6 +372,18 @@ impl SyncValidator {
     pub async fn health_check(&self) -> ArbitrageResult<ComponentHealth> {
         let health = self.health.read().await;
         Ok(health.clone())
+    }
+
+    /// Get metrics
+    pub async fn get_metrics(&self) -> ArbitrageResult<SyncValidationMetrics> {
+        Ok(SyncValidationMetrics {
+            total_validations: 0,
+            successful_validations: 0,
+            failed_validations: 0,
+            average_validation_time_ms: 0.0,
+            validation_rules_count: 0,
+            collected_at: chrono::Utc::now().timestamp_millis() as u64,
+        })
     }
 
     /// Shutdown validator

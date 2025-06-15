@@ -6,17 +6,17 @@ set -e
 
 echo "🚀 Starting ArbEdge Production Deployment..."
 
-# Check if wrangler is installed
-if ! command -v wrangler &> /dev/null; then
-    echo "❌ Wrangler CLI not found. Installing..."
-    npm install -g wrangler@latest
+# Check if wrangler is installed via pnpm
+if ! pnpm wrangler --version &> /dev/null; then
+    echo "❌ Wrangler CLI not found. Installing via pnpm..."
+    pnpm add -D wrangler@latest
 fi
 
 # Authenticate with Cloudflare (if not already authenticated)
 echo "🔐 Checking Cloudflare authentication..."
-if ! wrangler whoami &> /dev/null; then
+if ! pnpm wrangler whoami &> /dev/null; then
     echo "Please authenticate with Cloudflare:"
-    wrangler login
+    pnpm wrangler login
 fi
 
 # Set required secrets
@@ -33,7 +33,7 @@ if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
 else
     echo "✅ Using TELEGRAM_BOT_TOKEN from environment variables"
 fi
-wrangler secret put TELEGRAM_BOT_TOKEN --env production <<< "$TELEGRAM_BOT_TOKEN"
+pnpm wrangler secret put TELEGRAM_BOT_TOKEN --env production <<< "$TELEGRAM_BOT_TOKEN"
 
 # Cloudflare API Token - check environment variable first
 if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
@@ -43,16 +43,16 @@ if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
 else
     echo "✅ Using CLOUDFLARE_API_TOKEN from environment variables"
 fi
-wrangler secret put CLOUDFLARE_API_TOKEN --env production <<< "$CLOUDFLARE_API_TOKEN"
+pnpm wrangler secret put CLOUDFLARE_API_TOKEN --env production <<< "$CLOUDFLARE_API_TOKEN"
 
 # Re-enable command echoing if it was previously enabled
 set -x
 
 # Create KV Namespaces
 echo "📦 Creating KV namespaces..."
-USER_PROFILES_ID=$(wrangler kv:namespace create "USER_PROFILES" --env production | grep -o 'id = "[^"]*"' | cut -d'"' -f2)
-MARKET_CACHE_ID=$(wrangler kv:namespace create "PROD_BOT_MARKET_CACHE" --env production | grep -o 'id = "[^"]*"' | cut -d'"' -f2)
-SESSION_STORE_ID=$(wrangler kv:namespace create "PROD_BOT_SESSION_STORE" --env production | grep -o 'id = "[^"]*"' | cut -d'"' -f2)
+USER_PROFILES_ID=$(pnpm wrangler kv:namespace create "USER_PROFILES" --env production | grep -o 'id = "[^"]*"' | cut -d'"' -f2)
+MARKET_CACHE_ID=$(pnpm wrangler kv:namespace create "PROD_BOT_MARKET_CACHE" --env production | grep -o 'id = "[^"]*"' | cut -d'"' -f2)
+SESSION_STORE_ID=$(pnpm wrangler kv:namespace create "PROD_BOT_SESSION_STORE" --env production | grep -o 'id = "[^"]*"' | cut -d'"' -f2)
 
 # Validate KV namespace IDs
 if [ -z "$USER_PROFILES_ID" ] || [ "$USER_PROFILES_ID" = "null" ]; then
@@ -77,7 +77,7 @@ echo "  PROD_BOT_SESSION_STORE: $SESSION_STORE_ID"
 
 # Create D1 Database
 echo "🗄️ Creating D1 database..."
-D1_DB_ID=$(wrangler d1 create arbitrage-production --env production | grep -o 'database_id = "[^"]*"' | cut -d'"' -f2)
+D1_DB_ID=$(pnpm wrangler d1 create arbitrage-production --env production | grep -o 'database_id = "[^"]*"' | cut -d'"' -f2)
 
 # Validate D1 database ID
 if [ -z "$D1_DB_ID" ] || [ "$D1_DB_ID" = "null" ]; then
@@ -89,23 +89,23 @@ echo "✅ D1 Database created: $D1_DB_ID"
 
 # Create R2 Buckets
 echo "🪣 Creating R2 buckets..."
-wrangler r2 bucket create arb-edge-market-data --env production
-wrangler r2 bucket create arb-edge-analytics --env production
+pnpm wrangler r2 bucket create arb-edge-market-data --env production
+pnpm wrangler r2 bucket create arb-edge-analytics --env production
 echo "✅ R2 Buckets created"
 
 # Create Queues
 echo "🚥 Creating Cloudflare Queues..."
-wrangler queues create opportunity-distribution --env production
-wrangler queues create user-notifications --env production
-wrangler queues create analytics-events --env production
-wrangler queues create dead-letter-queue --env production
+pnpm wrangler queues create opportunity-distribution --env production
+pnpm wrangler queues create user-notifications --env production
+pnpm wrangler queues create analytics-events --env production
+pnpm wrangler queues create dead-letter-queue --env production
 echo "✅ Queues created"
 
 # Create Pipelines
 echo "🔄 Creating Cloudflare Pipelines..."
-wrangler pipelines create market-data-pipeline --r2-bucket arb-edge-market-data --env production
-wrangler pipelines create analytics-pipeline --r2-bucket arb-edge-analytics --env production
-wrangler pipelines create audit-pipeline --r2-bucket arb-edge-analytics --env production
+pnpm wrangler pipelines create market-data-pipeline --r2-bucket arb-edge-market-data --env production
+pnpm wrangler pipelines create analytics-pipeline --r2-bucket arb-edge-analytics --env production
+pnpm wrangler pipelines create audit-pipeline --r2-bucket arb-edge-analytics --env production
 echo "✅ Pipelines created"
 
 # Update wrangler.toml with actual IDs
@@ -142,7 +142,7 @@ echo "✅ wrangler.toml updated successfully"
 
 # Run D1 migrations
 echo "🔄 Running D1 migrations..."
-wrangler d1 migrations apply arbitrage-production --env production
+pnpm wrangler d1 migrations apply arbitrage-production --env production
 
 # Run CI pipeline before deployment
 echo "🧪 Running CI pipeline to ensure code quality..."
@@ -154,18 +154,18 @@ cargo install -q worker-build
 worker-build --release
 
 # Deploy to production
-wrangler deploy --env production
+pnpm wrangler deploy --env production
 
 echo "🎉 Deployment completed successfully!"
 echo ""
 echo "📋 Next steps:"
 echo "1. Update your domain DNS to point to the Worker"
 echo "2. Test all endpoints"
-echo "3. Monitor logs: wrangler tail --env production"
+echo "3. Monitor logs: pnpm wrangler tail --env production"
 echo "4. Check analytics in Cloudflare dashboard"
 echo ""
 echo "🔗 Useful commands:"
-echo "  View logs: wrangler tail --env production"
-echo "  Update secrets: wrangler secret put SECRET_NAME --env production"
-echo "  Check KV data: wrangler kv:key list --binding USER_PROFILES --env production"
-echo "  Query D1: wrangler d1 execute arbitrage-production --command 'SELECT * FROM users;' --env production"
+echo "  View logs: pnpm wrangler tail --env production"
+echo "  Update secrets: pnpm wrangler secret put SECRET_NAME --env production"
+echo "  Check KV data: pnpm wrangler kv:key list --binding USER_PROFILES --env production"
+echo "  Query D1: pnpm wrangler d1 execute arbitrage-production --command 'SELECT * FROM users;' --env production"

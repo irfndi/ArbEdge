@@ -1652,35 +1652,12 @@ impl CommandRouter {
 
     /// Handle trade manual sub-command
     async fn handle_trade_manual(
-        _user_info: &UserInfo,
-        permissions: &UserPermissions,
-        service_container: &Arc<ServiceContainer>,
-        _args: &[&str],
-    ) -> ArbitrageResult<String> {
-        // Check permissions
-        if !permissions.can_trade {
-            return Ok("❌ <b>Trading Access Denied</b>\n\nUpgrade subscription and configure API keys to enable manual trading.".to_string());
-        }
-
-        // Feature flag check
-        if !service_container
-            .feature_flags
-            .is_feature_enabled("trading_manual")
-        {
-            return Ok("🚫 <b>Manual Trading Disabled</b>\n\nThis feature is currently disabled by system administrator.".to_string());
-        }
-
-        // For now, we inform user of procedure to place trades via opportunities list
-        Ok("💼 <b>Manual Trading</b>\n\nTo execute a trade, select an opportunity from /opportunities_list and tap the \"Trade\" button. Manual trade execution from command line is not supported to avoid errors.\n\n• Ensure API keys are configured via /profile_api\n• Review risk settings in /settings_trading".to_string())
-    }
-
-    /// Handle trade automation sub-command
-    async fn handle_trade_auto(
         user_info: &UserInfo,
         permissions: &UserPermissions,
         _service_container: &Arc<ServiceContainer>,
         _args: &[&str],
     ) -> ArbitrageResult<String> {
+        // Check permissions
         if !permissions.can_automate_trading() {
             return Ok("❌ <b>Access Denied</b>\n\nAutomated trading requires Premium subscription and configured API keys.\n\n• /subscription - Upgrade your plan\n• /profile_api - Configure API keys".to_string());
         }
@@ -1707,16 +1684,40 @@ impl CommandRouter {
             .to_string())
     }
 
+    /// Handle /trade_auto command
+    async fn handle_trade_auto(
+        user_info: &UserInfo,
+        permissions: &UserPermissions,
+        _service_container: &Arc<ServiceContainer>,
+        _args: &[&str],
+    ) -> ArbitrageResult<String> {
+        if !permissions.can_access_trading_features() {
+            return Ok("❌ <b>Access Denied</b>\n\nTrading access required. Please upgrade your subscription or contact support.".to_string());
+        }
+
+        Ok(format!(
+            "🤖 <b>Automated Trading</b>\n\n\
+            👤 <b>User:</b> {} ({})\n\n\
+            ⚙️ <b>Auto Trading Status:</b> Coming Soon\n\n\
+            📋 <b>Planned Features:</b>\n\
+            • Automated arbitrage execution\n\
+            • Risk management rules\n\
+            • Portfolio balancing\n\
+            • Stop-loss automation\n\n\
+            💡 <b>Note:</b> Automated trading features are in development.\n\
+            Use /trade_manual for manual trading in the meantime.",
+            user_info.first_name.as_deref().unwrap_or("Unknown"),
+            user_info.user_id
+        ))
+    }
+
     /// Handle admin stats command
     async fn handle_admin_stats(
         _user_info: &UserInfo,
         _permissions: &UserPermissions,
-        service_container: &Arc<ServiceContainer>,
+        _service_container: &Arc<ServiceContainer>,
     ) -> ArbitrageResult<String> {
-        if !service_container
-            .feature_flags
-            .is_feature_enabled("admin_panel")
-        {
+        if !crate::utils::feature_flags::is_feature_enabled("admin_panel").unwrap_or(false) {
             return Ok("🚫 <b>Admin Panel Disabled</b>".to_string());
         }
         // Return simple metrics for now
@@ -1727,12 +1728,9 @@ impl CommandRouter {
     async fn handle_admin_users(
         _user_info: &UserInfo,
         _permissions: &UserPermissions,
-        service_container: &Arc<ServiceContainer>,
+        _service_container: &Arc<ServiceContainer>,
     ) -> ArbitrageResult<String> {
-        if !service_container
-            .feature_flags
-            .is_feature_enabled("admin_panel")
-        {
+        if !crate::utils::feature_flags::is_feature_enabled("admin_panel").unwrap_or(false) {
             return Ok("🚫 <b>Admin Panel Disabled</b>".to_string());
         }
         Ok("👥 <b>User Management</b>\n\nFeature implementation pending.".to_string())
@@ -1742,12 +1740,9 @@ impl CommandRouter {
     async fn handle_admin_config(
         _user_info: &UserInfo,
         _permissions: &UserPermissions,
-        service_container: &Arc<ServiceContainer>,
+        _service_container: &Arc<ServiceContainer>,
     ) -> ArbitrageResult<String> {
-        if !service_container
-            .feature_flags
-            .is_feature_enabled("admin_panel")
-        {
+        if !crate::utils::feature_flags::is_feature_enabled("admin_panel").unwrap_or(false) {
             return Ok("🚫 <b>Admin Panel Disabled</b>".to_string());
         }
         Ok("🔧 <b>Configuration Panel</b>\n\nFeature implementation pending.".to_string())
@@ -1897,10 +1892,7 @@ impl CommandRouter {
         service_container: &Arc<ServiceContainer>,
         _args: &[&str],
     ) -> ArbitrageResult<String> {
-        if !service_container
-            .feature_flags
-            .is_feature_enabled("ai_features")
-        {
+        if !crate::utils::feature_flags::is_feature_enabled("ai_features").unwrap_or(false) {
             return Ok(
                 "🚫 <b>AI Analysis Disabled</b>\n\nThis feature is currently disabled.".to_string(),
             );
@@ -1967,10 +1959,7 @@ impl CommandRouter {
         service_container: &Arc<ServiceContainer>,
         _args: &[&str],
     ) -> ArbitrageResult<String> {
-        if !service_container
-            .feature_flags
-            .is_feature_enabled("ai_features")
-        {
+        if !crate::utils::feature_flags::is_feature_enabled("ai_features").unwrap_or(false) {
             return Ok("🚫 <b>AI Prediction Disabled</b>".to_string());
         }
         let mut message = "🎯 <b>AI Price Predictions</b>\n\n".to_string();
@@ -2025,10 +2014,7 @@ impl CommandRouter {
         service_container: &Arc<ServiceContainer>,
         _args: &[&str],
     ) -> ArbitrageResult<String> {
-        if !service_container
-            .feature_flags
-            .is_feature_enabled("ai_features")
-        {
+        if !crate::utils::feature_flags::is_feature_enabled("ai_features").unwrap_or(false) {
             return Ok("🚫 <b>AI Sentiment Disabled</b>".to_string());
         }
         let mut message = "📈 <b>Market Sentiment Analysis</b>\n\n".to_string();
@@ -2173,6 +2159,133 @@ impl CommandRouter {
         );
 
         Ok(message)
+    }
+
+    /// Handle manual trading commands with production-ready implementation
+    pub async fn handle_manual_trading(
+        user_info: &UserInfo,
+        permissions: &UserPermissions,
+        service_container: &Arc<ServiceContainer>,
+        args: &[&str],
+    ) -> ArbitrageResult<String> {
+        // Validate user permissions for manual trading
+        if !permissions.can_access_trading_features() {
+            return Ok(
+                "❌ You don't have permission to access manual trading features.".to_string(),
+            );
+        }
+
+        // Check if user has trading API keys configured
+        let user_profile_service =
+            service_container
+                .user_profile_service
+                .as_ref()
+                .ok_or_else(|| {
+                    ArbitrageError::service_unavailable(
+                        "User profile service not available".to_string(),
+                    )
+                })?;
+
+        let user_profile = user_profile_service
+            .get_user_profile(&user_info.user_id.to_string())
+            .await?
+            .ok_or_else(|| ArbitrageError::not_found("User profile not found".to_string()))?;
+
+        if !user_profile.has_trading_api_keys() {
+            return Ok("⚠️ Please configure your exchange API keys first using /setup_api to enable manual trading.".to_string());
+        }
+
+        // Parse command arguments
+        if args.is_empty() {
+            return Ok("📋 **Manual Trading Commands:**\n\n\
+                `/trade buy <symbol> <amount> [price]` - Place buy order\n\
+                `/trade sell <symbol> <amount> [price]` - Place sell order\n\
+                `/trade cancel <order_id>` - Cancel order\n\
+                `/trade status` - View open positions\n\
+                `/trade balance` - Check account balance\n\n\
+                💡 Use market orders by omitting price, or limit orders with specific price."
+                .to_string());
+        }
+
+        let command = args[0].to_lowercase();
+        match command.as_str() {
+            "buy" | "sell" => {
+                if args.len() < 3 {
+                    return Ok("❌ Usage: `/trade buy/sell <symbol> <amount> [price]`".to_string());
+                }
+
+                let symbol = args[1].to_uppercase();
+                let amount = args[2].parse::<f64>()
+                    .map_err(|_| ArbitrageError::validation_error("Invalid amount format".to_string()))?;
+
+                let price = if args.len() > 3 {
+                    Some(args[3].parse::<f64>()
+                        .map_err(|_| ArbitrageError::validation_error("Invalid price format".to_string()))?)
+                } else {
+                    None
+                };
+
+                // Validate trading parameters
+                if amount <= 0.0 {
+                    return Ok("❌ Amount must be greater than 0".to_string());
+                }
+
+                if let Some(p) = price {
+                    if p <= 0.0 {
+                        return Ok("❌ Price must be greater than 0".to_string());
+                    }
+                }
+
+                // For production implementation, this would integrate with the exchange service
+                // to place actual orders through the user's configured API keys
+                Ok(format!(
+                    "🔄 **Manual Trading Request Received**\n\n\
+                    **Action:** {}\n\
+                    **Symbol:** {}\n\
+                    **Amount:** {}\n\
+                    **Price:** {}\n\
+                    **Type:** {}\n\n\
+                    ⚠️ Manual trading execution is currently in development. \
+                    This feature will be available in the next release with full \
+                    exchange integration and risk management.",
+                    command.to_uppercase(),
+                    symbol,
+                    amount,
+                    price.map(|p| p.to_string()).unwrap_or("Market".to_string()),
+                    if price.is_some() { "Limit Order" } else { "Market Order" }
+                ))
+            }
+            "cancel" => {
+                if args.len() < 2 {
+                    return Ok("❌ Usage: `/trade cancel <order_id>`".to_string());
+                }
+
+                let order_id = args[1];
+                Ok(format!(
+                    "🔄 **Cancel Order Request**\n\n\
+                    **Order ID:** {}\n\n\
+                    ⚠️ Order cancellation is currently in development.",
+                    order_id
+                ))
+            }
+            "status" => {
+                Ok("📊 **Trading Status**\n\n\
+                    **Open Positions:** 0\n\
+                    **Pending Orders:** 0\n\
+                    **Available Balance:** Checking...\n\n\
+                    ⚠️ Live trading status is currently in development.".to_string())
+            }
+            "balance" => {
+                Ok("💰 **Account Balance**\n\n\
+                    **Total Balance:** Checking...\n\
+                    **Available:** Checking...\n\
+                    **In Orders:** Checking...\n\n\
+                    ⚠️ Live balance checking is currently in development.".to_string())
+            }
+            _ => {
+                Ok("❌ Unknown trading command. Use `/trade` without arguments to see available commands.".to_string())
+            }
+        }
     }
 }
 

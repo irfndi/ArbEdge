@@ -56,6 +56,29 @@
     "cost_allocation": false,
     "shared_cost_pools": false,
     "real_time_cost_tracking": false,
+    "opportunity_monitoring": {
+      "enabled": true,
+      "pipeline_stage_tracking": true,
+      "api_call_monitoring": true,
+      "service_initialization_tracking": true,
+      "opportunity_generation_metrics": true,
+      "error_tracking": true,
+      "zero_opportunity_alerts": true,
+      "performance_metrics": true,
+      "cache_efficiency_tracking": true,
+      "duplicate_detection_monitoring": true,
+      "comprehensive_reporting": true,
+      "max_api_call_history": 1000,
+      "max_service_init_history": 500,
+      "max_error_history": 1000,
+      "alert_thresholds": {
+        "zero_opportunities_minutes": 10,
+        "high_error_rate_percentage": 5.0,
+        "slow_response_time_ms": 5000,
+        "high_duplicate_rate_percentage": 50.0,
+        "api_failure_rate_percentage": 10.0
+      }
+    },
     "collection_interval_seconds": 30,
     "export_interval_seconds": 60,
     "max_metric_series": 10000,
@@ -97,6 +120,17 @@
     "automated_testing": true,
     "deployment_automation": true
   },
+  "session_optimization": {
+    "enabled": true,
+    "multi_tier_caching": true,
+    "memory_cache_enabled": true,
+    "intelligent_db_writes": true,
+    "cache_cleanup": true,
+    "memory_cache_ttl_seconds": 300,
+    "db_write_interval_minutes": 5,
+    "cache_cleanup_interval_minutes": 10,
+    "max_memory_cache_entries": 1000
+  },
   "infrastructure_features": {
     "unified_circuit_breaker": true,
     "unified_retry_logic": true,
@@ -109,7 +143,33 @@
     "transaction_coordination": true,
     "migration_engine": true,
     "performance_monitoring": true,
-    "observability_coordinator": true
+    "observability_coordinator": true,
+    "advanced_sync": false
+  },
+  "data_synchronization": {
+    "enabled": false,
+    "cloudflare_sync_coordinator": false,
+    "kv_d1_sync": false,
+    "r2_sync": false,
+    "pipeline_sync": false,
+    "durable_objects_sync": false,
+    "eventual_consistency": true,
+    "strong_consistency": false,
+    "conflict_resolution": false,
+    "automatic_retry": true,
+    "circuit_breaker_integration": false,
+    "health_monitoring": false,
+    "sync_metrics": false,
+    "batch_operations": true,
+    "parallel_sync": false,
+    "fallback_mechanisms": true,
+    "sync_interval_seconds": 30,
+    "max_retry_attempts": 3,
+    "retry_backoff_multiplier": 2.0,
+    "batch_size": 100,
+    "max_concurrent_operations": 10,
+    "consistency_check_interval_seconds": 300,
+    "sync_timeout_seconds": 30
   },
   "security_features": {
     "input_validation": true,
@@ -126,5 +186,13 @@
   "funding_rate_integration": {
     "enabled": true,
     "cache_ttl_seconds": 7200
+  },
+  "geographic_fallback": {
+    "enabled": true,
+    "binance_us_fallback": true,
+    "max_fallback_attempts": 2,
+    "immediate_fallback_on_451": true,
+    "retry_delay_ms": 1000,
+    "bybit_us_restriction_handling": true
   }
 }

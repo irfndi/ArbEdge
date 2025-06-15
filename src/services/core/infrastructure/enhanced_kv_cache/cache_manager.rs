@@ -1,7 +1,7 @@
 // Core KV Cache Manager - Main orchestrator for enhanced KV cache operations
 // Compatible with existing DataCoordinator and cache_layer.rs architecture
 
-use crate::utils::{ArbitrageError, ArbitrageResult};
+use crate::utils::error::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,6 +13,11 @@ use super::{
     metadata::{DataType, MetadataTracker},
     warming::CacheWarmingService,
     CacheEntry, CacheOperation, CacheTier, EnhancedCacheStats,
+};
+
+// Optional metrics collector integration
+use crate::services::core::infrastructure::monitoring_module::metrics_collector::{
+    CacheOperation as MonitoringCacheOperation, MetricsCollector,
 };
 
 /// Enhanced cache metrics compatible with DataAccessLayer health monitoring
@@ -109,6 +114,24 @@ pub struct BatchResult {
     pub was_compressed: bool,
 }
 
+/// Cache source for tracking where data came from
+#[derive(Debug, Clone, PartialEq)]
+pub enum CacheSource {
+    Memory,   // KV Cache
+    Pipeline, // Pipeline/R2 data
+    Api,      // Direct API call
+}
+
+/// Enhanced cache result with source tracking
+#[derive(Debug, Clone)]
+pub struct CacheResult<T> {
+    pub data: Option<T>,
+    pub hit: bool,
+    pub source: CacheSource,
+    pub latency_ms: f64,
+    pub compression_ratio: Option<f64>,
+}
+
 /// Core KV Cache Manager - orchestrates all enhanced cache operations
 pub struct KvCacheManager {
     config: EnhancedCacheConfig,
@@ -123,6 +146,9 @@ pub struct KvCacheManager {
     metrics: Arc<std::sync::Mutex<CacheManagerMetrics>>,
     #[allow(dead_code)]
     cache_stats: Arc<std::sync::Mutex<EnhancedCacheStats>>,
+
+    // Optional monitoring integration
+    metrics_collector: Option<Arc<MetricsCollector>>,
 
     // Startup time for metrics
     startup_time: u64,
@@ -192,8 +218,43 @@ impl KvCacheManager {
             warming_service,
             metrics: Arc::new(std::sync::Mutex::new(initial_metrics)),
             cache_stats: Arc::new(std::sync::Mutex::new(EnhancedCacheStats::default())),
+            metrics_collector: None,
             startup_time: chrono::Utc::now().timestamp_millis() as u64,
         })
+    }
+
+    /// Set optional metrics collector for monitoring integration
+    pub fn with_metrics_collector(mut self, metrics_collector: Arc<MetricsCollector>) -> Self {
+        self.metrics_collector = Some(metrics_collector);
+        self
+    }
+
+    /// Record cache operation metrics if collector is available
+    async fn record_cache_metrics(
+        &self,
+        operation: MonitoringCacheOperation,
+        cache_type: &str,
+        endpoint: &str,
+        was_hit: bool,
+        response_time_ms: u64,
+        cache_size_bytes: Option<u64>,
+    ) {
+        if let Some(ref collector) = self.metrics_collector {
+            if let Err(e) = collector
+                .collect_cache_metric(
+                    operation,
+                    cache_type,
+                    endpoint,
+                    was_hit,
+                    response_time_ms,
+                    cache_size_bytes,
+                )
+                .await
+            {
+                self.logger
+                    .warn(&format!("Failed to record cache metrics: {:?}", e));
+            }
+        }
     }
 
     /// Get value from cache with automatic tier management
@@ -219,6 +280,19 @@ impl KvCacheManager {
 
                 self.record_hit(&data_type, cache_entry.tier, start_time)
                     .await;
+
+                // Record cache metrics
+                let response_time_ms = start_time.elapsed().as_millis() as u64;
+                self.record_cache_metrics(
+                    MonitoringCacheOperation::Get,
+                    &data_type.to_string(),
+                    key,
+                    true,
+                    response_time_ms,
+                    Some(cache_entry.value.len() as u64),
+                )
+                .await;
+
                 Ok(Some(cache_entry.value))
             }
             Ok(None) => {
@@ -228,6 +302,19 @@ impl KvCacheManager {
                 }
 
                 self.record_miss(&data_type, start_time).await;
+
+                // Record cache miss metrics
+                let response_time_ms = start_time.elapsed().as_millis() as u64;
+                self.record_cache_metrics(
+                    MonitoringCacheOperation::Get,
+                    &data_type.to_string(),
+                    key,
+                    false,
+                    response_time_ms,
+                    None,
+                )
+                .await;
+
                 Ok(None)
             }
             Err(e) => {
@@ -259,6 +346,19 @@ impl KvCacheManager {
             Ok(()) => {
                 self.record_successful_put(&data_type, tier, start_time)
                     .await;
+
+                // Record cache set metrics
+                let response_time_ms = start_time.elapsed().as_millis() as u64;
+                self.record_cache_metrics(
+                    MonitoringCacheOperation::Set,
+                    &data_type.to_string(),
+                    key,
+                    true, // Put operations are always successful when they reach here
+                    response_time_ms,
+                    Some(value.len() as u64),
+                )
+                .await;
+
                 Ok(())
             }
             Err(e) => {
@@ -689,10 +789,15 @@ impl KvCacheManager {
 
         // Default tier assignment based on data type
         match data_type {
-            DataType::MarketData | DataType::Session => CacheTier::Hot,
-            DataType::UserProfile | DataType::Opportunities => CacheTier::Warm,
-            DataType::Analytics | DataType::Configuration => CacheTier::Cold,
-            DataType::AiResponse | DataType::Historical => CacheTier::Cold,
+            DataType::MarketData => CacheTier::Hot, // Real-time data needs hot tier
+            DataType::FundingRate => CacheTier::Warm, // Funding rates change less frequently
+            DataType::UserProfile => CacheTier::Warm, // User data accessed regularly
+            DataType::Opportunities => CacheTier::Hot, // Trading opportunities are time-sensitive
+            DataType::Session => CacheTier::Hot,    // Session data needs fast access
+            DataType::Configuration => CacheTier::Cold, // Config rarely changes
+            DataType::Analytics => CacheTier::Cold, // Analytics can be slower
+            DataType::AiResponse => CacheTier::Warm, // AI responses moderately accessed
+            DataType::Historical => CacheTier::Cold, // Historical data less frequently accessed
             DataType::Generic => CacheTier::Warm,
         }
     }
@@ -1385,6 +1490,51 @@ impl KvCacheManager {
             },
             "generated_at": report.generated_at
         }))
+    }
+
+    /// Add proper cache headers to response
+    pub fn add_cache_headers(
+        &self,
+        response: &mut worker::Response,
+        cache_type: &str,
+        ttl_seconds: u64,
+    ) -> ArbitrageResult<()> {
+        let headers = response.headers_mut();
+
+        match cache_type {
+            "market_data" => {
+                headers.set(
+                    "Cache-Control",
+                    &format!("public, max-age={}, s-maxage={}", ttl_seconds, ttl_seconds),
+                )?;
+                headers.set("Vary", "Accept-Encoding")?;
+                headers.set("X-Cache-Type", "market-data")?;
+            }
+            "opportunities" => {
+                headers.set(
+                    "Cache-Control",
+                    &format!("public, max-age={}, s-maxage={}", ttl_seconds, ttl_seconds),
+                )?;
+                headers.set("Vary", "User-Agent, Accept-Encoding")?;
+                headers.set("X-Cache-Type", "opportunities")?;
+            }
+            "static" => {
+                headers.set(
+                    "Cache-Control",
+                    &format!("public, max-age={}, immutable", ttl_seconds),
+                )?;
+                headers.set("X-Cache-Type", "static")?;
+            }
+            _ => {
+                headers.set("Cache-Control", &format!("public, max-age={}", ttl_seconds))?;
+            }
+        }
+
+        // Add ETag for conditional requests
+        let etag = format!("\"{}\"", chrono::Utc::now().timestamp());
+        headers.set("ETag", &etag)?;
+
+        Ok(())
     }
 }
 

@@ -2444,6 +2444,16 @@ impl GlobalOpportunity {
     }
 }
 
+/// Grouped opportunity structure for smart sorting and deduplication
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupedOpportunity {
+    pub symbol: String,
+    pub best_opportunity: GlobalOpportunity,
+    pub total_opportunities: usize,
+    pub available_exchanges: Vec<String>,
+    pub expires_in_minutes: u32,
+}
+
 /// Group admin role structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupAdminRole {
@@ -3039,7 +3049,7 @@ pub struct OrderBook {
 }
 
 /// Ticker structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Ticker {
     pub symbol: String,
     pub timestamp: u64,

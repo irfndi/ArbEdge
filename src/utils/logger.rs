@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use worker::console_log;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_macros)]
 macro_rules! console_log {
     ($($arg:tt)*) => {
         println!($($arg)*);

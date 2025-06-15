@@ -23,12 +23,31 @@ use crate::services::core::user::user_profile::UserProfileService;
 
 use crate::services::core::admin::AdminService;
 use crate::services::core::ai::ai_analysis_service::AiAnalysisService;
+use crate::services::core::infrastructure::monitoring_module::metrics_collector::{
+    MetricsCollector, MetricsCollectorConfig,
+};
+use crate::services::core::infrastructure::monitoring_module::opportunity_monitor::OpportunityMonitor;
+use crate::services::core::infrastructure::InfrastructureConfig;
+use crate::services::core::infrastructure::InfrastructureManager;
 use crate::services::interfaces::telegram::ModularTelegramService;
-use crate::utils::feature_flags::{load_feature_flags, FeatureFlags};
+use crate::services::CacheManager;
+use crate::utils::feature_flags::{initialize_feature_flags, FeatureFlagManager};
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use std::sync::Arc;
 use worker::console_log;
 use worker::{kv::KvStore, Env};
+
+/// Parameters for initializing opportunity engine to reduce function argument count
+#[derive(Clone)]
+pub struct OpportunityEngineInitParams {
+    pub user_profile_service: Arc<UserProfileService>,
+    pub exchange_service: Arc<ExchangeService>,
+    pub kv_store: KvStore,
+    pub database_manager: DatabaseManager,
+    pub data_ingestion_module: Option<Arc<DataIngestionModule>>,
+    pub pipeline_manager: Option<Arc<crate::services::core::infrastructure::data_ingestion_module::pipeline_manager::PipelineManager>>,
+    pub opportunity_monitor: Option<Arc<OpportunityMonitor>>,
+}
 
 /// Comprehensive service container for managing all application services
 /// Provides centralized dependency injection and service lifecycle management
@@ -45,7 +64,8 @@ pub struct ServiceContainer {
     pub data_ingestion_module: Option<Arc<DataIngestionModule>>,
     pub database_manager: DatabaseManager,
     pub data_access_layer: DataAccessLayer,
-    pub feature_flags: Arc<FeatureFlags>,
+    pub infrastructure_manager: Option<Arc<InfrastructureManager>>,
+    pub opportunity_monitor: Option<Arc<OpportunityMonitor>>,
 }
 
 impl ServiceContainer {
@@ -64,22 +84,58 @@ impl ServiceContainer {
         let data_access_layer =
             DataAccessLayer::new(DataAccessLayerConfig::default(), kv_store.clone()).await?;
 
-        let feature_flags = load_feature_flags("feature_flags.json").unwrap_or_else(|_| {
-            console_log!("⚠️ Failed to load feature flags from file, using defaults");
-            Arc::new(FeatureFlags::new(std::collections::HashMap::new()))
-        });
+        // Initialize feature flags for production environment
+        initialize_feature_flags("production").map_err(|e| {
+            ArbitrageError::configuration_error(format!(
+                "Failed to initialize feature flags: {}",
+                e
+            ))
+        })?;
+
+        console_log!("✅ SERVICE_CONTAINER - Feature flags initialized for production environment");
 
         let session_service_instance = Arc::new(SessionManagementService::new(
             database_manager.clone(),
             kv_store.clone(),
         ));
 
-        let exchange_service = Arc::new(ExchangeService::new(env).map_err(|e| {
-            ArbitrageError::configuration_error(format!(
-                "Failed to create exchange service: {:?}",
-                e
-            ))
-        })?);
+        // Initialize cache manager for cache-first patterns
+        let _cache_manager = Arc::new(CacheManager::new(kv_store.clone()));
+
+        // Initialize Infrastructure Manager with pipeline-first architecture
+        let infrastructure_config = InfrastructureConfig::default();
+        let mut infrastructure_manager = InfrastructureManager::new(infrastructure_config)?;
+        infrastructure_manager.initialize(env).await?;
+        let infrastructure_manager = Arc::new(infrastructure_manager);
+
+        // Initialize metrics collector for monitoring
+        let metrics_config = MetricsCollectorConfig::high_performance();
+        let metrics_collector =
+            Arc::new(MetricsCollector::new(metrics_config, kv_store.clone(), env).await?);
+
+        // Initialize opportunity monitor for comprehensive tracking
+        let opportunity_monitor = Arc::new(OpportunityMonitor::new(metrics_collector));
+
+        // Get pipeline components from infrastructure manager
+        let data_ingestion_module = infrastructure_manager
+            .data_ingestion_module()
+            .ok()
+            .map(|dim| Arc::new(dim.clone()));
+        let pipeline_manager = data_ingestion_module
+            .as_ref()
+            .map(|dim| dim.get_pipeline_manager());
+
+        // Create exchange service
+        let mut exchange_service = ExchangeService::new(kv_store.clone(), env.clone());
+
+        // Configure super admin API credentials for global market data access
+        Self::configure_super_admin_apis(&mut exchange_service, env).await?;
+
+        // Inject opportunity monitor for API call tracking
+        exchange_service.set_opportunity_monitor(opportunity_monitor.clone());
+        console_log!("✅ Opportunity monitor injected into ExchangeService");
+
+        let exchange_service = Arc::new(exchange_service);
 
         let user_profile_service_instance = Arc::new(UserProfileService::new(
             kv_store.clone(),
@@ -96,17 +152,18 @@ impl ServiceContainer {
         // Initialize OpportunityEngine
         let opportunity_engine = Self::initialize_opportunity_engine(
             env,
-            user_profile_service_instance.clone(),
-            exchange_service.clone(),
-            kv_store.clone(),
-            database_manager.clone(),
+            OpportunityEngineInitParams {
+                user_profile_service: user_profile_service_instance.clone(),
+                exchange_service: exchange_service.clone(),
+                kv_store: kv_store.clone(),
+                database_manager: database_manager.clone(),
+                data_ingestion_module: data_ingestion_module.clone(),
+                pipeline_manager: pipeline_manager.clone(),
+                opportunity_monitor: Some(opportunity_monitor.clone()),
+            },
         )
         .await
         .ok();
-
-        // Initialize Telegram Service (using modular service)
-        // Note: Telegram service will be initialized after ServiceContainer creation to avoid circular dependency
-        let telegram_service = None;
 
         // Initialize AI Analysis Service
         let ai_analysis_service = Some(Arc::new(AiAnalysisService::new(
@@ -115,6 +172,33 @@ impl ServiceContainer {
                 ArbitrageError::configuration_error(format!("Failed to get D1 database: {:?}", e))
             })?),
         )));
+
+        // Initialize Telegram Service (using modular service)
+        // Create a temporary container to avoid circular dependency
+        let temp_container = Arc::new(Self {
+            session_service: session_service_instance.clone(),
+            distribution_service: distribution_service.clone(),
+            telegram_service: None,
+            exchange_service: exchange_service.clone(),
+            user_profile_service: Some(user_profile_service_instance.clone()),
+            admin_service: None,
+            ai_analysis_service: ai_analysis_service.clone(),
+            data_ingestion_module: data_ingestion_module.clone(),
+            database_manager: database_manager.clone(),
+            data_access_layer: data_access_layer.clone(),
+            opportunity_engine: opportunity_engine.clone(),
+            infrastructure_manager: Some(infrastructure_manager.clone()),
+            opportunity_monitor: Some(opportunity_monitor.clone()),
+        });
+
+        // Now initialize the telegram service with the temporary container
+        let telegram_service = match Self::initialize_telegram_service(temp_container, env).await {
+            Ok(service) => Some(service),
+            Err(e) => {
+                console_log!("⚠️ Failed to initialize Telegram service: {:?}", e);
+                None
+            }
+        };
 
         // Initialize Admin Service (will be created when needed)
         let admin_service = None;
@@ -127,22 +211,27 @@ impl ServiceContainer {
             user_profile_service: Some(user_profile_service_instance),
             admin_service,
             ai_analysis_service,
-            data_ingestion_module: None,
+            data_ingestion_module: data_ingestion_module.clone(),
             database_manager,
             data_access_layer,
-            feature_flags,
             opportunity_engine,
+            infrastructure_manager: Some(infrastructure_manager),
+            opportunity_monitor: Some(opportunity_monitor),
         })
     }
 
     /// Initialize OpportunityEngine with proper dependencies
     async fn initialize_opportunity_engine(
         _env: &Env,
-        user_profile_service: Arc<UserProfileService>,
-        exchange_service: Arc<ExchangeService>,
-        kv_store: KvStore,
-        database_manager: DatabaseManager,
+        params: OpportunityEngineInitParams,
     ) -> ArbitrageResult<Arc<OpportunityEngine>> {
+        let user_profile_service = params.user_profile_service;
+        let exchange_service = params.exchange_service;
+        let kv_store = params.kv_store;
+        let database_manager = params.database_manager;
+        let data_ingestion_module = params.data_ingestion_module;
+        let pipeline_manager = params.pipeline_manager;
+        let opportunity_monitor = params.opportunity_monitor;
         // Create UserAccessService
         let user_access_service = Arc::new(
             crate::services::core::user::user_access::UserAccessService::new(
@@ -164,16 +253,37 @@ impl ServiceContainer {
         let config =
             crate::services::core::opportunities::opportunity_core::OpportunityConfig::default();
 
-        let engine = OpportunityEngine::new(
+        let mut engine = OpportunityEngine::new(
             user_profile_service,
             user_access_service,
             ai_service,
             exchange_service.clone(),
             kv_store,
+            database_manager.get_database(),
             config,
         )?;
 
-        console_log!("✅ OpportunityEngine initialized successfully");
+        // Inject pipeline components into the opportunity engine's market analyzer
+        if let (Some(data_ingestion), Some(pipeline_mgr)) =
+            (data_ingestion_module, pipeline_manager)
+        {
+            engine.inject_pipeline_components(data_ingestion, pipeline_mgr);
+            console_log!("✅ Pipeline components injected into OpportunityEngine");
+        } else {
+            console_log!("⚠️ Pipeline components not available - falling back to direct API calls");
+        }
+
+        // Inject opportunity monitor for comprehensive tracking
+        if let Some(monitor) = opportunity_monitor {
+            engine.inject_opportunity_monitor(monitor);
+            console_log!("✅ Opportunity monitor injected into OpportunityEngine");
+        } else {
+            console_log!("⚠️ Opportunity monitor not available - monitoring disabled");
+        }
+
+        console_log!(
+            "✅ OpportunityEngine initialized successfully with pipeline-first architecture"
+        );
         Ok(Arc::new(engine))
     }
 
@@ -213,6 +323,89 @@ impl ServiceContainer {
         let container = Self::new(env, kv_store).await?;
         // container.distribution_service = container.distribution_service.with_config(config);
         Ok(container)
+    }
+
+    /// Configure super admin API credentials for global market data access
+    async fn configure_super_admin_apis(
+        exchange_service: &mut ExchangeService,
+        env: &Env,
+    ) -> ArbitrageResult<()> {
+        console_log!("🔧 Configuring super admin API credentials for global market data");
+
+        // Configure Binance super admin API
+        if let (Ok(api_key), Ok(secret)) = (
+            env.secret("BINANCE_SUPER_ADMIN_API_KEY"),
+            env.secret("BINANCE_SUPER_ADMIN_SECRET"),
+        ) {
+            let credentials = crate::types::ExchangeCredentials {
+                exchange: crate::types::ExchangeIdEnum::Binance,
+                api_key: api_key.to_string(),
+                api_secret: secret.to_string(),
+                secret: secret.to_string(),
+                passphrase: None,
+                sandbox: false,
+                is_testnet: false,
+                default_leverage: 1,
+                exchange_type: "spot".to_string(),
+            };
+
+            exchange_service.configure_super_admin_api("binance".to_string(), credentials)?;
+            console_log!("✅ Binance super admin API configured");
+        } else {
+            console_log!("⚠️ Binance super admin API credentials not found in environment");
+        }
+
+        // Configure Bybit super admin API
+        if let (Ok(api_key), Ok(secret)) = (
+            env.secret("BYBIT_SUPER_ADMIN_API_KEY"),
+            env.secret("BYBIT_SUPER_ADMIN_SECRET"),
+        ) {
+            let credentials = crate::types::ExchangeCredentials {
+                exchange: crate::types::ExchangeIdEnum::Bybit,
+                api_key: api_key.to_string(),
+                api_secret: secret.to_string(),
+                secret: secret.to_string(),
+                passphrase: None,
+                sandbox: false,
+                is_testnet: false,
+                default_leverage: 1,
+                exchange_type: "spot".to_string(),
+            };
+
+            exchange_service.configure_super_admin_api("bybit".to_string(), credentials)?;
+            console_log!("✅ Bybit super admin API configured");
+        } else {
+            console_log!("⚠️ Bybit super admin API credentials not found in environment");
+        }
+
+        // Configure OKX super admin API
+        if let (Ok(api_key), Ok(secret)) = (
+            env.secret("OKX_SUPER_ADMIN_API_KEY"),
+            env.secret("OKX_SUPER_ADMIN_SECRET"),
+        ) {
+            let passphrase = env.secret("OKX_SUPER_ADMIN_PASSPHRASE").ok();
+            let credentials = crate::types::ExchangeCredentials {
+                exchange: crate::types::ExchangeIdEnum::OKX,
+                api_key: api_key.to_string(),
+                api_secret: secret.to_string(),
+                secret: secret.to_string(),
+                passphrase: passphrase.map(|p| p.to_string()),
+                sandbox: false,
+                is_testnet: false,
+                default_leverage: 1,
+                exchange_type: "spot".to_string(),
+            };
+
+            exchange_service.configure_super_admin_api("okx".to_string(), credentials)?;
+            console_log!("✅ OKX super admin API configured");
+        } else {
+            console_log!("⚠️ OKX super admin API credentials not found in environment");
+        }
+
+        console_log!(
+            "🎯 Super admin API configuration completed - real market data access enabled"
+        );
+        Ok(())
     }
 
     /// Initialize Telegram service after container creation to avoid circular dependency
@@ -364,8 +557,15 @@ impl ServiceContainer {
     }
 
     /// Get feature flags
-    pub fn get_feature_flags(&self) -> Arc<FeatureFlags> {
-        self.feature_flags.clone()
+    pub fn get_feature_flags(&self) -> FeatureFlagManager {
+        // Return a new instance of the feature flag manager
+        // In production, this would access the global feature flag state
+        FeatureFlagManager::default()
+    }
+
+    /// Get opportunity monitor
+    pub fn opportunity_monitor(&self) -> Option<&Arc<OpportunityMonitor>> {
+        self.opportunity_monitor.as_ref()
     }
 
     /// Validate that all required services are configured

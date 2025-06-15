@@ -39,12 +39,48 @@ impl OpportunityBuilder {
     ) -> ArbitrageResult<ArbitrageOpportunity> {
         let rate_difference = (short_rate - long_rate).abs();
 
+        // Use feature flags for dynamic threshold configuration
+        let min_threshold = crate::utils::feature_flags::get_numeric_feature_value(
+            "opportunity_engine.min_rate_threshold",
+            self.config.min_rate_difference,
+        );
+
         // Validate rate difference meets minimum threshold
         let rate_difference_percent = rate_difference * 100.0;
-        if rate_difference_percent < self.config.min_rate_difference {
+
+        // Enhanced logging for production debugging
+        if crate::utils::feature_flags::is_feature_enabled("opportunity_engine.enhanced_logging")
+            .unwrap_or(false)
+        {
+            #[cfg(target_arch = "wasm32")]
+            worker::console_log!(
+                "📊 FUNDING_ARBITRAGE - Pair: {}, Long: {} ({:.6}%), Short: {} ({:.6}%), Diff: {:.6}%, Threshold: {:.6}%",
+                pair,
+                long_exchange.as_str(),
+                long_rate * 100.0,
+                short_exchange.as_str(),
+                short_rate * 100.0,
+                rate_difference_percent,
+                min_threshold
+            );
+
+            #[cfg(not(target_arch = "wasm32"))]
+            println!(
+                "📊 FUNDING_ARBITRAGE - Pair: {}, Long: {} ({:.6}%), Short: {} ({:.6}%), Diff: {:.6}%, Threshold: {:.6}%",
+                pair,
+                long_exchange.as_str(),
+                long_rate * 100.0,
+                short_exchange.as_str(),
+                short_rate * 100.0,
+                rate_difference_percent,
+                min_threshold
+            );
+        }
+
+        if rate_difference_percent < min_threshold {
             return Err(ArbitrageError::validation_error(format!(
-                "Rate difference {:.4}% below minimum threshold {:.4}%",
-                rate_difference_percent, self.config.min_rate_difference
+                "Rate difference {:.6}% below minimum threshold {:.6}%",
+                rate_difference_percent, min_threshold
             )));
         }
 
@@ -81,11 +117,12 @@ impl OpportunityBuilder {
             detected_at: chrono::Utc::now().timestamp_millis() as u64,
             r#type: ArbitrageType::FundingRate,
             details: Some(format!(
-                "Funding rate arbitrage: Long {} at {:.4}%, Short {} at {:.4}%",
-                long_exchange,
+                "Funding rate arbitrage: Long {} at {:.6}%, Short {} at {:.6}%, Diff: {:.6}%",
+                long_exchange.as_str(),
                 long_rate * 100.0,
-                short_exchange,
-                short_rate * 100.0
+                short_exchange.as_str(),
+                short_rate * 100.0,
+                rate_difference_percent
             )),
             min_exchanges_required: 2,
         };
@@ -95,7 +132,9 @@ impl OpportunityBuilder {
             serde_json::json!({
                 "pair": opportunity.pair,
                 "rate_difference": rate_difference,
+                "rate_difference_percent": rate_difference_percent,
                 "potential_profit": potential_profit_value,
+                "confidence_score": confidence_score,
                 "context": format!("{:?}", context)
             })
         );
@@ -115,12 +154,48 @@ impl OpportunityBuilder {
     ) -> ArbitrageResult<ArbitrageOpportunity> {
         let price_difference = ((short_price - long_price) / long_price).abs();
 
+        // Use feature flags for dynamic threshold configuration
+        let min_threshold = crate::utils::feature_flags::get_numeric_feature_value(
+            "opportunity_engine.min_rate_threshold",
+            self.config.min_rate_difference,
+        );
+
         // Validate price difference meets minimum threshold
         let price_difference_percent = price_difference * 100.0;
-        if price_difference_percent < self.config.min_rate_difference {
+
+        // Enhanced logging for production debugging
+        if crate::utils::feature_flags::is_feature_enabled("opportunity_engine.enhanced_logging")
+            .unwrap_or(false)
+        {
+            #[cfg(target_arch = "wasm32")]
+            worker::console_log!(
+                "💰 PRICE_ARBITRAGE - Pair: {}, Long: {} (${:.4}), Short: {} (${:.4}), Diff: {:.6}%, Threshold: {:.6}%",
+                pair,
+                long_exchange.as_str(),
+                long_price,
+                short_exchange.as_str(),
+                short_price,
+                price_difference_percent,
+                min_threshold
+            );
+
+            #[cfg(not(target_arch = "wasm32"))]
+            println!(
+                "💰 PRICE_ARBITRAGE - Pair: {}, Long: {} (${:.4}), Short: {} (${:.4}), Diff: {:.6}%, Threshold: {:.6}%",
+                pair,
+                long_exchange.as_str(),
+                long_price,
+                short_exchange.as_str(),
+                short_price,
+                price_difference_percent,
+                min_threshold
+            );
+        }
+
+        if price_difference_percent < min_threshold {
             return Err(ArbitrageError::validation_error(format!(
-                "Price difference {:.4}% below minimum threshold {:.4}%",
-                price_difference_percent, self.config.min_rate_difference
+                "Price difference {:.6}% below minimum threshold {:.6}%",
+                price_difference_percent, min_threshold
             )));
         }
 
@@ -139,8 +214,8 @@ impl OpportunityBuilder {
             risk_level: "medium".to_string(),
             buy_exchange: long_exchange.to_string(),
             sell_exchange: short_exchange.to_string(),
-            buy_price: 0.0,
-            sell_price: 0.0,
+            buy_price: long_price,
+            sell_price: short_price,
             volume: 1000.0, // Default volume
             created_at: chrono::Utc::now().timestamp_millis() as u64,
             expires_at: Some(chrono::Utc::now().timestamp_millis() as u64 + (15 * 60 * 1000)), // 15 minutes
@@ -156,11 +231,12 @@ impl OpportunityBuilder {
             detected_at: chrono::Utc::now().timestamp_millis() as u64,
             r#type: ArbitrageType::Price,
             details: Some(format!(
-                "Price arbitrage: Buy {} (${:.2}) vs Sell {} (${:.2})",
+                "Price arbitrage: Buy {} (${:.4}) vs Sell {} (${:.4}), Diff: {:.4}%",
                 long_exchange.as_str(),
                 long_price,
                 short_exchange.as_str(),
-                short_price
+                short_price,
+                price_difference_percent
             )),
             min_exchanges_required: 2,
         };
@@ -170,7 +246,9 @@ impl OpportunityBuilder {
             serde_json::json!({
                 "pair": opportunity.pair,
                 "price_difference": price_difference,
+                "price_difference_percent": price_difference_percent,
                 "potential_profit": potential_profit_value,
+                "confidence_score": confidence_score,
                 "context": format!("{:?}", context)
             })
         );
@@ -737,7 +815,33 @@ mod tests {
     use super::*;
 
     fn create_test_config() -> OpportunityConfig {
-        OpportunityConfig::default()
+        // Create test config without calling WASM-specific functions
+        OpportunityConfig {
+            symbols: vec!["BTC/USDT".to_string(), "ETH/USDT".to_string()],
+            max_opportunities: 100,
+            enable_ai: true,
+            enable_caching: true,
+            cache_ttl_seconds: 300,
+            min_confidence_threshold: 0.7,
+            max_risk_level: 0.8,
+            default_pairs: vec![
+                "BTC/USDT".to_string(),
+                "ETH/USDT".to_string(),
+                "BNB/USDT".to_string(),
+                "SOL/USDT".to_string(),
+                "ADA/USDT".to_string(),
+            ],
+            min_rate_difference: 0.05,
+            monitored_exchanges: vec![
+                ExchangeIdEnum::Coinbase,
+                ExchangeIdEnum::OKX,
+                ExchangeIdEnum::Binance,
+                ExchangeIdEnum::Bybit,
+                ExchangeIdEnum::Bitget,
+            ],
+            opportunity_ttl_minutes: 15,
+            max_participants_per_opportunity: 10,
+        }
     }
 
     #[test]

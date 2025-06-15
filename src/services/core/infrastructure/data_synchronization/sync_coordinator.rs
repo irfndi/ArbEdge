@@ -5,9 +5,9 @@
 //! health monitoring, and performance metrics.
 
 use crate::services::core::infrastructure::{
-    persistence_layer::{ConnectionManager, TransactionCoordinator},
     circuit_breaker_service::CircuitBreakerService,
-    shared_types::ComponentHealth,
+    persistence_layer::{ConnectionManager, TransactionCoordinator},
+    shared_types::{CircuitBreakerState, ComponentHealth},
 };
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
@@ -138,9 +138,7 @@ pub enum SyncOperation {
         storage_targets: Vec<StorageTarget>,
     },
     /// Bulk operation
-    Bulk {
-        operations: Vec<SyncOperation>,
-    },
+    Bulk { operations: Vec<SyncOperation> },
 }
 
 /// Storage targets for sync operations
@@ -151,7 +149,10 @@ pub enum StorageTarget {
     /// Cloudflare D1 database
     D1 { database: String, table: String },
     /// Cloudflare R2 object storage
-    R2 { bucket: String, prefix: Option<String> },
+    R2 {
+        bucket: String,
+        prefix: Option<String>,
+    },
 }
 
 /// Sync event types
@@ -329,11 +330,11 @@ impl SyncCoordinator {
         feature_flags: &super::SyncFeatureFlags,
     ) -> ArbitrageResult<Self> {
         // Initialize connection manager
-        let persistence_config = crate::services::core::infrastructure::persistence_layer::PersistenceConfig::default();
-        let pool_config = crate::services::core::infrastructure::persistence_layer::PoolConfig::default();
-        let connection_manager = Arc::new(
-            ConnectionManager::new(env, &pool_config).await?
-        );
+        let persistence_config =
+            crate::services::core::infrastructure::persistence_layer::PersistenceConfig::default();
+        let pool_config =
+            crate::services::core::infrastructure::persistence_layer::PoolConfig::default();
+        let connection_manager = Arc::new(ConnectionManager::new(env, &pool_config).await?);
 
         // Initialize transaction coordinator
         let transaction_coordinator = Arc::new(
@@ -345,12 +346,12 @@ impl SyncCoordinator {
 
         // Initialize circuit breaker
         let circuit_breaker_config = crate::services::core::infrastructure::circuit_breaker_service::CircuitBreakerConfig::default();
-        let circuit_breaker = Arc::new(
-            CircuitBreakerService::new(&circuit_breaker_config).await?
-        );
+        let circuit_breaker = Arc::new(CircuitBreakerService::new(&circuit_breaker_config).await?);
 
         // Initialize strategies
-        let strategies = Arc::new(RwLock::new(SyncStrategies::new(config, &circuit_breaker).await?));
+        let strategies = Arc::new(RwLock::new(
+            SyncStrategies::new(config, &circuit_breaker).await?,
+        ));
 
         // Initialize metrics
         let metrics = Arc::new(Mutex::new(SyncCoordinatorMetrics::default()));
@@ -360,8 +361,14 @@ impl SyncCoordinator {
             is_healthy: true,
             last_check: chrono::Utc::now().timestamp_millis() as u64,
             error_count: 0,
+            warning_count: 0,
             uptime_seconds: 0,
             performance_score: 1.0,
+            resource_usage_percent: 0.0,
+            last_error: None,
+            last_warning: None,
+            component_name: "sync_coordinator".to_string(),
+            version: "1.0.0".to_string(),
         }));
 
         Ok(Self {
@@ -401,23 +408,32 @@ impl SyncCoordinator {
         let operation_id = uuid::Uuid::new_v4().to_string();
         let start_time = chrono::Utc::now().timestamp_millis() as u64;
 
-        // Check circuit breaker
-        if !self.circuit_breaker.can_execute().await {
-            return Err(ArbitrageError::service_unavailable(
-                "Sync coordinator circuit breaker is open"
-            ));
+        // Check circuit breaker state
+        if let Some(state) = self
+            .circuit_breaker
+            .get_circuit_breaker_state("sync_coordinator")
+            .await
+        {
+            if state.state == CircuitBreakerState::Open {
+                return Err(ArbitrageError::service_unavailable(
+                    "Sync coordinator circuit breaker is open",
+                ));
+            }
         }
 
         // Track operation
         {
             let mut active_ops = self.active_operations.lock().await;
-            active_ops.insert(operation_id.clone(), SyncOperationContext {
-                operation_id: operation_id.clone(),
-                operation: operation.clone(),
-                status: SyncStatus::InProgress,
-                start_time,
-                retry_count: 0,
-            });
+            active_ops.insert(
+                operation_id.clone(),
+                SyncOperationContext {
+                    operation_id: operation_id.clone(),
+                    operation: operation.clone(),
+                    status: SyncStatus::InProgress,
+                    start_time,
+                    retry_count: 0,
+                },
+            );
         }
 
         // Emit operation started event
@@ -428,10 +444,13 @@ impl SyncCoordinator {
             details: HashMap::new(),
             duration_ms: None,
             error: None,
-        }).await;
+        })
+        .await;
 
         // Execute sync operation
-        let result = self.execute_sync_operation(&operation_id, operation, write_mode).await;
+        let result = self
+            .execute_sync_operation(&operation_id, operation, write_mode)
+            .await;
 
         // Update operation status
         {
@@ -456,7 +475,8 @@ impl SyncCoordinator {
             details: HashMap::new(),
             duration_ms: Some(duration_ms),
             error: result.as_ref().err().map(|e| e.to_string()),
-        }).await;
+        })
+        .await;
 
         // Update metrics
         self.update_metrics(&result, duration_ms).await;
@@ -491,11 +511,11 @@ impl SyncCoordinator {
                 let active_ops = self.active_operations.lock().await;
                 active_ops.len()
             };
-            
+
             if active_count == 0 {
                 break;
             }
-            
+
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             retry_count += 1;
         }
@@ -522,7 +542,7 @@ impl SyncCoordinator {
                     conflicts_detected: 0,
                     repairs_performed: 0,
                 })
-            },
+            }
             SyncOperation::Read { .. } => {
                 // Implementation would handle the actual read operation with repair logic
                 Ok(SyncOperationResult {
@@ -532,7 +552,7 @@ impl SyncCoordinator {
                     conflicts_detected: 0,
                     repairs_performed: 0,
                 })
-            },
+            }
             SyncOperation::Delete { .. } => {
                 // Implementation would handle the actual delete operation across storage systems
                 Ok(SyncOperationResult {
@@ -542,7 +562,7 @@ impl SyncCoordinator {
                     conflicts_detected: 0,
                     repairs_performed: 0,
                 })
-            },
+            }
             SyncOperation::Bulk { .. } => {
                 // Implementation would handle bulk operations efficiently
                 Ok(SyncOperationResult {
@@ -552,7 +572,7 @@ impl SyncCoordinator {
                     conflicts_detected: 0,
                     repairs_performed: 0,
                 })
-            },
+            }
         }
     }
 
@@ -566,7 +586,7 @@ impl SyncCoordinator {
     async fn emit_event(&self, event: SyncEvent) {
         let mut queue = self.event_queue.lock().await;
         queue.push_back(event);
-        
+
         // Keep queue size manageable
         if queue.len() > 10000 {
             queue.pop_front();
@@ -574,24 +594,28 @@ impl SyncCoordinator {
     }
 
     /// Update metrics
-    async fn update_metrics(&self, result: &ArbitrageResult<SyncOperationResult>, duration_ms: u64) {
+    async fn update_metrics(
+        &self,
+        result: &ArbitrageResult<SyncOperationResult>,
+        duration_ms: u64,
+    ) {
         let mut metrics = self.metrics.lock().await;
-        
+
         metrics.sync_stats.total_operations += 1;
-        
+
         match result {
             Ok(_) => {
                 metrics.sync_stats.successful_operations += 1;
-            },
+            }
             Err(_) => {
                 metrics.sync_stats.failed_operations += 1;
-            },
+            }
         }
-        
+
         // Update average latency (simple moving average)
-        metrics.sync_stats.average_latency_ms = 
+        metrics.sync_stats.average_latency_ms =
             (metrics.sync_stats.average_latency_ms + duration_ms as f64) / 2.0;
-            
+
         metrics.sync_stats.last_operation_timestamp = chrono::Utc::now().timestamp_millis() as u64;
     }
 }
@@ -617,7 +641,10 @@ pub struct StorageOperationResult {
 
 impl SyncStrategies {
     /// Create new sync strategies
-    async fn new(config: &SyncCoordinatorConfig, circuit_breaker: &Arc<CircuitBreakerService>) -> ArbitrageResult<Self> {
+    async fn new(
+        config: &SyncCoordinatorConfig,
+        circuit_breaker: &Arc<CircuitBreakerService>,
+    ) -> ArbitrageResult<Self> {
         let mut strategies = Self {
             write_through: None,
             write_behind: None,
@@ -633,26 +660,26 @@ impl SyncStrategies {
                         config: config.clone(),
                         circuit_breaker: Arc::clone(circuit_breaker),
                     });
-                },
+                }
                 SyncStrategy::WriteBehind(config) => {
                     strategies.write_behind = Some(WriteBehindHandler {
                         config: config.clone(),
                         operation_queue: Arc::new(Mutex::new(VecDeque::new())),
                         last_flush: Arc::new(Mutex::new(0)),
                     });
-                },
+                }
                 SyncStrategy::ReadRepair(config) => {
                     strategies.read_repair = Some(ReadRepairHandler {
                         config: config.clone(),
                         repair_stats: Arc::new(Mutex::new(RepairStats::default())),
                     });
-                },
+                }
                 SyncStrategy::PeriodicReconciliation(config) => {
                     strategies.reconciliation = Some(ReconciliationHandler {
                         config: config.clone(),
                         last_reconciliation: Arc::new(Mutex::new(0)),
                     });
-                },
+                }
             }
         }
 
@@ -746,4 +773,4 @@ impl Default for SyncCoordinatorMetrics {
 }
 
 // Config type needed by SyncConfig in mod.rs export
-pub type SyncConfig = SyncCoordinatorConfig; 
+pub type SyncConfig = SyncCoordinatorConfig;

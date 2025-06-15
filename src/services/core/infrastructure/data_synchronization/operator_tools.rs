@@ -4,14 +4,15 @@
 //! tools for sync management including force sync triggers, monitoring dashboards,
 //! and emergency controls.
 
-use super::{SyncCoordinator, SyncOperation, SyncOperationResult, StorageTarget, WriteMode};
+use super::sync_coordinator::StorageTarget;
+use super::{SyncCoordinator, SyncOperation, WriteMode};
 use crate::services::core::infrastructure::shared_types::ComponentHealth;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use worker::{Env, Request, Response, Result as WorkerResult, RouteContext};
+use worker::{Request, Response, Result as WorkerResult, RouteContext};
 
 /// Operator tools configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -429,13 +430,10 @@ impl ManualSyncTrigger {
     }
 
     /// Trigger manual sync operation
-    pub async fn trigger_sync(
-        &self,
-        request: ManualSyncRequest,
-    ) -> ArbitrageResult<String> {
+    pub async fn trigger_sync(&self, request: ManualSyncRequest) -> ArbitrageResult<String> {
         if !self.config.enable_manual_triggers {
             return Err(ArbitrageError::permission_denied(
-                "Manual sync triggers are disabled"
+                "Manual sync triggers are disabled",
             ));
         }
 
@@ -447,7 +445,7 @@ impl ManualSyncTrigger {
             let mut queue = self.operation_queue.lock().await;
             if queue.len() >= self.config.max_queue_size as usize {
                 return Err(ArbitrageError::resource_exhausted(
-                    "Sync operation queue is full"
+                    "Sync operation queue is full",
                 ));
             }
             queue.push_back(request.clone());
@@ -511,21 +509,23 @@ impl ManualSyncTrigger {
 
         // Type-specific validation
         match &request.trigger_type {
-            SyncTriggerType::RangeSync { start_key, end_key, .. } => {
+            SyncTriggerType::RangeSync {
+                start_key, end_key, ..
+            } => {
                 if start_key.is_empty() || end_key.is_empty() {
                     return Err(ArbitrageError::validation_error(
-                        "Range sync requires non-empty start and end keys"
+                        "Range sync requires non-empty start and end keys",
                     ));
                 }
-            },
+            }
             SyncTriggerType::SelectiveSync { data_types, .. } => {
                 if data_types.is_empty() {
                     return Err(ArbitrageError::validation_error(
-                        "Selective sync requires at least one data type"
+                        "Selective sync requires at least one data type",
                     ));
                 }
-            },
-            _ => {}, // Other types are valid by default
+            }
+            _ => {} // Other types are valid by default
         }
 
         Ok(())
@@ -556,11 +556,11 @@ impl ManualSyncTrigger {
                 let active_ops = self.active_operations.lock().await;
                 active_ops.len()
             };
-            
+
             if active_count == 0 {
                 break;
             }
-            
+
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             retry_count += 1;
         }
@@ -595,6 +595,12 @@ impl SyncDashboardService {
                 error_count: 0,
                 uptime_seconds: 0,
                 performance_score: 1.0,
+                warning_count: 0,
+                resource_usage_percent: 0.0,
+                last_error: None,
+                last_warning: None,
+                component_name: "sync_dashboard".to_string(),
+                version: "1.0.0".to_string(),
             },
             active_operations: Vec::new(),
             queue_status: SyncQueueStatus {
@@ -649,7 +655,7 @@ impl SyncDashboardService {
     pub async fn add_event(&self, event: SyncEvent) {
         let mut queue = self.event_queue.lock().await;
         queue.push_back(event);
-        
+
         // Keep queue size manageable
         if queue.len() > 1000 {
             queue.pop_front();
@@ -665,22 +671,22 @@ impl SyncDashboardService {
     /// Update dashboard data
     async fn update_dashboard_data(&self) -> ArbitrageResult<()> {
         let mut dashboard = self.dashboard_data.write().await;
-        
+
         // Update timestamp
         dashboard.timestamp = chrono::Utc::now().timestamp_millis() as u64;
-        
+
         // Update queue status
         dashboard.queue_status = self.manual_trigger.get_queue_status().await?;
-        
+
         // Update coordinator health
         dashboard.overall_health = self.sync_coordinator.health_check().await?;
-        
+
         // Update recent events
         {
             let event_queue = self.event_queue.lock().await;
             dashboard.recent_events = event_queue.iter().rev().take(100).cloned().collect();
         }
-        
+
         Ok(())
     }
 
@@ -713,17 +719,18 @@ impl OperatorToolsService {
     ) -> ArbitrageResult<Self> {
         // Create manual trigger
         let manual_trigger = Arc::new(
-            ManualSyncTrigger::new(config, feature_flags, Arc::clone(&sync_coordinator)).await?
+            ManualSyncTrigger::new(config, feature_flags, Arc::clone(&sync_coordinator)).await?,
         );
 
         // Create dashboard service
         let dashboard_service = Arc::new(
             SyncDashboardService::new(
-                config, 
-                feature_flags, 
-                sync_coordinator, 
-                Arc::clone(&manual_trigger)
-            ).await?
+                config,
+                feature_flags,
+                sync_coordinator,
+                Arc::clone(&manual_trigger),
+            )
+            .await?,
         );
 
         let health = Arc::new(RwLock::new(ComponentHealth {
@@ -771,25 +778,23 @@ impl OperatorToolsService {
     /// Handle trigger sync request
     async fn handle_trigger_sync(&self, mut req: Request) -> WorkerResult<Response> {
         match req.json::<ManualSyncRequest>().await {
-            Ok(sync_request) => {
-                match self.manual_trigger.trigger_sync(sync_request).await {
-                    Ok(request_id) => {
-                        let response = serde_json::json!({
-                            "success": true,
-                            "request_id": request_id,
-                            "message": "Sync operation queued successfully"
-                        });
-                        Response::from_json(&response)
-                    },
-                    Err(e) => {
-                        let error_response = serde_json::json!({
-                            "success": false,
-                            "error": e.to_string()
-                        });
-                        Response::from_json(&error_response)
-                            .map(|r| r.with_status(400))
-                            .unwrap_or_else(|_| Response::error("Internal Server Error", 500).unwrap())
-                    }
+            Ok(sync_request) => match self.manual_trigger.trigger_sync(sync_request).await {
+                Ok(request_id) => {
+                    let response = serde_json::json!({
+                        "success": true,
+                        "request_id": request_id,
+                        "message": "Sync operation queued successfully"
+                    });
+                    Response::from_json(&response)
+                }
+                Err(e) => {
+                    let error_response = serde_json::json!({
+                        "success": false,
+                        "error": e.to_string()
+                    });
+                    Response::from_json(&error_response)
+                        .map(|r| r.with_status(400))
+                        .unwrap_or_else(|_| Response::error("Internal Server Error", 500).unwrap())
                 }
             },
             Err(_) => Response::error("Bad Request", 400),
@@ -844,6 +849,27 @@ impl OperatorToolsService {
         Ok(health.clone())
     }
 
+    /// Get metrics
+    pub async fn get_metrics(&self) -> ArbitrageResult<OperatorToolsMetrics> {
+        Ok(OperatorToolsMetrics {
+            manual_trigger_metrics: ManualTriggerMetrics {
+                total_requests: 0,
+                successful_requests: 0,
+                failed_requests: 0,
+                average_processing_time_ms: 0.0,
+                queue_size: 0,
+                active_operations: 0,
+            },
+            dashboard_metrics: DashboardMetrics {
+                total_views: 0,
+                refresh_count: 0,
+                average_response_time_ms: 0.0,
+                active_connections: 0,
+            },
+            collected_at: chrono::Utc::now().timestamp_millis() as u64,
+        })
+    }
+
     /// Shutdown operator tools
     pub async fn shutdown(&self) -> ArbitrageResult<()> {
         self.manual_trigger.shutdown().await?;
@@ -863,4 +889,41 @@ impl Default for OperatorToolsConfig {
             operation_timeout_ms: 300000, // 5 minutes
         }
     }
-} 
+}
+
+/// Operator tools health status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorToolsHealth {
+    pub overall_healthy: bool,
+    pub manual_trigger_healthy: bool,
+    pub dashboard_healthy: bool,
+    pub last_check: u64,
+}
+
+/// Operator tools metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorToolsMetrics {
+    pub manual_trigger_metrics: ManualTriggerMetrics,
+    pub dashboard_metrics: DashboardMetrics,
+    pub collected_at: u64,
+}
+
+/// Manual trigger metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManualTriggerMetrics {
+    pub total_requests: u64,
+    pub successful_requests: u64,
+    pub failed_requests: u64,
+    pub average_processing_time_ms: f64,
+    pub queue_size: u32,
+    pub active_operations: u32,
+}
+
+/// Dashboard metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardMetrics {
+    pub total_views: u64,
+    pub refresh_count: u64,
+    pub average_response_time_ms: f64,
+    pub active_connections: u32,
+}

@@ -698,13 +698,21 @@ pub struct WebPushService {
     client: reqwest::Client,
 }
 
-// TODO: CRITICAL SECURITY ISSUE - WebPush VAPID authentication not implemented
-// This implementation is missing:
-// - JWT token generation using VAPID private key
-// - Proper Authorization and Crypto-Key headers
-// - Payload encryption using p256dh and auth keys
-// - Full VAPID protocol implementation
-// Current implementation will fail with most push services
+// CRITICAL: WebPush VAPID authentication not implemented
+// This is a production-blocking issue that must be resolved before deployment.
+// Missing implementations:
+// 1. JWT token generation using VAPID private key (ES256 algorithm)
+// 2. Authorization header: "vapid t=<jwt_token>, k=<public_key>"
+// 3. Crypto-Key header for payload encryption
+// 4. Payload encryption using p256dh and auth keys from subscription
+// 5. Full RFC 8292 VAPID protocol compliance
+// 
+// Current implementation will be rejected by all major push services
+// (FCM, Mozilla, Microsoft) due to missing authentication.
+//
+// REQUIRED DEPENDENCIES: jsonwebtoken, p256, aes-gcm (already available)
+// ESTIMATED EFFORT: 4-6 hours for full implementation
+// PRIORITY: HIGH - Required for production web push notifications
 
 impl WebPushService {
     pub fn new(vapid_private_key: String, vapid_public_key: String) -> Self {

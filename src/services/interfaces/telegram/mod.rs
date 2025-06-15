@@ -109,6 +109,24 @@ impl ModularTelegramService {
             .map(|_| ())
     }
 
+    /// Cleanup session memory cache (should be called periodically)
+    pub async fn cleanup_session_cache(&self) -> ArbitrageResult<()> {
+        let optimization_enabled =
+            crate::utils::feature_flags::is_feature_enabled("session_optimization.enabled")
+                .unwrap_or(false);
+        let cache_cleanup_enabled =
+            crate::utils::feature_flags::is_feature_enabled("session_optimization.cache_cleanup")
+                .unwrap_or(false);
+
+        if optimization_enabled && cache_cleanup_enabled {
+            console_log!("🧹 Cleaning up session memory cache");
+            let session_service = self.service_container.session_service();
+            session_service.cleanup_memory_cache();
+            console_log!("✅ Session memory cache cleanup completed");
+        }
+        Ok(())
+    }
+
     /// Handle incoming webhook update
     ///
     /// Priority: User onboarding and session management first
@@ -245,24 +263,62 @@ impl ModularTelegramService {
     }
 
     /// Ensure user has active session (Priority 1: Session Management)
+    /// Optimized for high-performance with multi-tier caching
     async fn ensure_user_session(&self, user_info: &UserInfo) -> ArbitrageResult<()> {
-        console_log!("🔐 Checking session for user {}", user_info.user_id);
-
         // Get session management service
         let session_service = self.service_container.session_service();
 
-        // Check if user has active session
-        let user_id_str = user_info.user_id.to_string();
-        let has_session = session_service.validate_session(&user_id_str).await?;
+        // Check if session optimization is enabled
+        let optimization_enabled =
+            crate::utils::feature_flags::is_feature_enabled("session_optimization.enabled")
+                .unwrap_or(false);
 
-        if has_session.is_none() {
-            console_log!("⚠️ No active session for user {}", user_info.user_id);
-            return Err(ArbitrageError::authentication_error("No active session"));
+        if optimization_enabled {
+            console_log!(
+                "🔐 Checking session for user {} (optimized)",
+                user_info.user_id
+            );
+
+            // Use optimized session validation (multi-tier caching)
+            let has_session = session_service
+                .validate_session_optimized(user_info.user_id)
+                .await?;
+
+            if has_session.is_none() {
+                console_log!("⚠️ No active session for user {}", user_info.user_id);
+                return Err(ArbitrageError::authentication_error("No active session"));
+            }
+
+            // Use optimized activity update (intelligent database writes)
+            session_service
+                .update_activity_optimized(user_info.user_id)
+                .await?;
+            console_log!(
+                "✅ Session validated for user {} (optimized)",
+                user_info.user_id
+            );
+        } else {
+            console_log!(
+                "🔐 Checking session for user {} (legacy)",
+                user_info.user_id
+            );
+
+            // Use legacy session validation
+            let user_id_str = user_info.user_id.to_string();
+            let has_session = session_service.validate_session(&user_id_str).await?;
+
+            if has_session.is_none() {
+                console_log!("⚠️ No active session for user {}", user_info.user_id);
+                return Err(ArbitrageError::authentication_error("No active session"));
+            }
+
+            // Use legacy activity update
+            session_service.update_activity(&user_id_str).await?;
+            console_log!(
+                "✅ Session validated for user {} (legacy)",
+                user_info.user_id
+            );
         }
-
-        // Update session activity
-        session_service.update_activity(&user_id_str).await?;
-        console_log!("✅ Session validated for user {}", user_info.user_id);
 
         Ok(())
     }

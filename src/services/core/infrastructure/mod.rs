@@ -34,6 +34,8 @@ use worker::Env;
 pub mod ai_services;
 pub mod data_access_layer;
 pub mod data_ingestion_module;
+#[cfg(feature = "advanced_sync")]
+pub mod data_synchronization;
 pub mod database_repositories;
 pub mod monitoring_module;
 pub mod notification_module;
@@ -103,6 +105,11 @@ pub use ai_services::{
 pub use data_access_layer::{
     APIConnector, CacheLayer, DataAccessLayer, DataAccessLayerConfig, DataAccessLayerHealth,
     DataCoordinator, DataSourceManager, DataValidator,
+};
+
+#[cfg(feature = "advanced_sync")]
+pub use data_synchronization::{
+    CloudflareSyncCoordinator, DataSynchronizationConfig, DataSynchronizationEngine,
 };
 
 pub use database_repositories::{
@@ -562,6 +569,7 @@ impl InfrastructureManager {
                 ArbitrageError::cache_error(format!("Failed to get KV store: {}", e))
             })?,
             infrastructure_engine::InfrastructureConfig::default(),
+            env.clone(),
         ));
 
         // Initialize chaos engineering framework

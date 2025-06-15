@@ -92,7 +92,7 @@ impl VectorClock {
     /// Check if this clock happened before another
     pub fn happens_before(&self, other: &VectorClock) -> bool {
         let mut found_smaller = false;
-        
+
         for (node, &timestamp) in &self.clocks {
             let other_timestamp = other.clocks.get(node).unwrap_or(&0);
             if timestamp > *other_timestamp {
@@ -102,7 +102,7 @@ impl VectorClock {
                 found_smaller = true;
             }
         }
-        
+
         found_smaller
     }
 
@@ -199,6 +199,32 @@ pub struct ConflictMetrics {
     pub last_conflict_time: u64,
 }
 
+/// Conflict resolver health status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictResolverHealth {
+    /// Overall health status
+    pub is_healthy: bool,
+    /// Last health check timestamp
+    pub last_check: u64,
+    /// Error count
+    pub error_count: u64,
+    /// Active conflicts count
+    pub active_conflicts_count: u64,
+    /// Resolution success rate
+    pub resolution_success_rate: f64,
+}
+
+/// Conflict resolver metrics for monitoring
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictResolverMetrics {
+    /// Conflict metrics
+    pub conflict_metrics: ConflictMetrics,
+    /// Health status
+    pub health: ConflictResolverHealth,
+    /// Timestamp when metrics were collected
+    pub collected_at: u64,
+}
+
 /// Conflict notification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConflictNotification {
@@ -274,7 +300,10 @@ impl ConflictDetector {
     fn detect_vector_clock_conflicts(&self, versions: &[ConflictVersion]) -> ArbitrageResult<bool> {
         for i in 0..versions.len() {
             for j in (i + 1)..versions.len() {
-                if versions[i].vector_clock.is_concurrent(&versions[j].vector_clock) {
+                if versions[i]
+                    .vector_clock
+                    .is_concurrent(&versions[j].vector_clock)
+                {
                     return Ok(true);
                 }
             }
@@ -313,8 +342,14 @@ impl ConflictResolver {
             is_healthy: true,
             last_check: chrono::Utc::now().timestamp_millis() as u64,
             error_count: 0,
+            warning_count: 0,
             uptime_seconds: 0,
             performance_score: 1.0,
+            resource_usage_percent: 0.0,
+            last_error: None,
+            last_warning: None,
+            component_name: "conflict_resolver".to_string(),
+            version: "1.0.0".to_string(),
         }));
 
         Ok(Self {
@@ -349,7 +384,7 @@ impl ConflictResolver {
 
             // Attempt resolution
             let result = self.attempt_resolution(&conflict).await?;
-            
+
             // Update metrics
             self.update_metrics(&result).await;
 
@@ -377,7 +412,10 @@ impl ConflictResolver {
     }
 
     /// Attempt to resolve a conflict
-    async fn attempt_resolution(&self, conflict: &ConflictEvent) -> ArbitrageResult<ConflictResolutionResult> {
+    async fn attempt_resolution(
+        &self,
+        conflict: &ConflictEvent,
+    ) -> ArbitrageResult<ConflictResolutionResult> {
         let start_time = chrono::Utc::now().timestamp_millis() as u64;
 
         // Try each resolution strategy
@@ -394,7 +432,9 @@ impl ConflictResolver {
             }
         }
 
-        Err(ArbitrageError::data_error("Failed to resolve conflict with available strategies"))
+        Err(ArbitrageError::data_error(
+            "Failed to resolve conflict with available strategies",
+        ))
     }
 
     /// Apply a specific resolution strategy
@@ -405,7 +445,8 @@ impl ConflictResolver {
     ) -> ArbitrageResult<ConflictResolutionResult> {
         match strategy {
             ConflictResolutionStrategy::LastWriteWins => {
-                let latest_version = conflict.versions
+                let latest_version = conflict
+                    .versions
                     .iter()
                     .max_by_key(|v| v.last_modified)
                     .ok_or_else(|| ArbitrageError::data_error("No versions found"))?;
@@ -417,9 +458,10 @@ impl ConflictResolver {
                     resolved_at: chrono::Utc::now().timestamp_millis() as u64,
                     resolution_duration_ms: 0,
                 })
-            },
+            }
             ConflictResolutionStrategy::FirstWriteWins => {
-                let earliest_version = conflict.versions
+                let earliest_version = conflict
+                    .versions
                     .iter()
                     .min_by_key(|v| v.last_modified)
                     .ok_or_else(|| ArbitrageError::data_error("No versions found"))?;
@@ -431,16 +473,14 @@ impl ConflictResolver {
                     resolved_at: chrono::Utc::now().timestamp_millis() as u64,
                     resolution_duration_ms: 0,
                 })
-            },
+            }
             ConflictResolutionStrategy::SemanticMerge(merge_strategy) => {
                 self.resolve_semantic_merge(conflict, merge_strategy).await
-            },
+            }
             ConflictResolutionStrategy::UserDefined(policy) => {
                 self.resolve_user_defined(conflict, policy).await
-            },
-            ConflictResolutionStrategy::Manual => {
-                self.escalate_to_manual(conflict).await
-            },
+            }
+            ConflictResolutionStrategy::Manual => self.escalate_to_manual(conflict).await,
         }
     }
 
@@ -477,25 +517,33 @@ impl ConflictResolver {
     }
 
     /// Escalate to manual resolution
-    async fn escalate_to_manual(&self, _conflict: &ConflictEvent) -> ArbitrageResult<ConflictResolutionResult> {
+    async fn escalate_to_manual(
+        &self,
+        _conflict: &ConflictEvent,
+    ) -> ArbitrageResult<ConflictResolutionResult> {
         Err(ArbitrageError::data_error("Manual resolution required"))
     }
 
     /// Update metrics
     async fn update_metrics(&self, result: &ConflictResolutionResult) {
         let mut metrics = self.metrics.lock().await;
-        
+
         metrics.total_conflicts += 1;
-        
+
         match result.strategy_used.as_str() {
             "Manual" => metrics.manual_resolved += 1,
             _ => metrics.auto_resolved += 1,
         }
-        
+
         // Update strategy usage
-        let count = metrics.strategy_usage.get(&result.strategy_used).unwrap_or(&0);
-        metrics.strategy_usage.insert(result.strategy_used.clone(), count + 1);
-        
+        let count = *metrics
+            .strategy_usage
+            .get(&result.strategy_used)
+            .unwrap_or(&0);
+        metrics
+            .strategy_usage
+            .insert(result.strategy_used.clone(), count + 1);
+
         metrics.last_conflict_time = chrono::Utc::now().timestamp_millis() as u64;
     }
 }
@@ -526,4 +574,4 @@ impl Default for ConflictMetrics {
             last_conflict_time: 0,
         }
     }
-} 
+}

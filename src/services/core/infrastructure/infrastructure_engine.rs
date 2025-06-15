@@ -37,7 +37,15 @@ use super::{
         HealthCheckConfig, HealthStatus, ServiceHealthCheck, ServiceHealthManager,
         SystemHealthReport,
     },
+    shared_types::ComponentHealth,
 };
+
+#[cfg(feature = "advanced_sync")]
+use super::data_synchronization::{DataSynchronizationConfig, DataSynchronizationEngine};
+
+use crate::utils::feature_flags::FeatureFlag;
+use crate::utils::logger::Logger;
+
 use worker::Env;
 
 /// Service types in the infrastructure
@@ -215,6 +223,7 @@ pub struct InfrastructureHealth {
 }
 
 /// Main infrastructure engine
+#[allow(dead_code)]
 pub struct InfrastructureEngine {
     config: InfrastructureConfig,
     kv_store: KvStore,
@@ -227,6 +236,9 @@ pub struct InfrastructureEngine {
     data_access_layer: Option<DataAccessLayer>,
     metrics_collector: Option<MetricsCollector>,
 
+    #[cfg(feature = "advanced_sync")]
+    data_synchronization_engine: Option<DataSynchronizationEngine>,
+
     // Service management with async-aware mutexes
     services: Arc<Mutex<HashMap<String, ServiceInfo>>>,
     circuit_breakers: Arc<Mutex<HashMap<String, CircuitBreaker>>>,
@@ -234,12 +246,18 @@ pub struct InfrastructureEngine {
 
     // Configuration management with async-aware mutex
     global_config: Arc<Mutex<HashMap<String, serde_json::Value>>>,
+
+    // Health and monitoring
+    service_health_map: Arc<std::sync::RwLock<HashMap<String, ComponentHealth>>>,
+    feature_flags: Arc<FeatureFlag>,
+    logger: Arc<Logger>,
+    env: Env,
 }
 
 #[allow(dead_code)]
 impl InfrastructureEngine {
     /// Create new InfrastructureEngine with default configuration
-    pub fn new(kv_store: KvStore) -> Self {
+    pub fn new(kv_store: KvStore, env: Env) -> Self {
         Self {
             config: InfrastructureConfig::default(),
             kv_store,
@@ -249,15 +267,21 @@ impl InfrastructureEngine {
             notification_engine: None,
             data_access_layer: None,
             metrics_collector: None,
+            #[cfg(feature = "advanced_sync")]
+            data_synchronization_engine: None,
             services: Arc::new(Mutex::new(HashMap::new())),
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
             startup_time: SystemTime::now(),
             global_config: Arc::new(Mutex::new(HashMap::new())),
+            service_health_map: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            feature_flags: Arc::new(FeatureFlag::default()),
+            logger: Arc::new(Logger::default()),
+            env,
         }
     }
 
     /// Create InfrastructureEngine with custom configuration
-    pub fn new_with_config(kv_store: KvStore, config: InfrastructureConfig) -> Self {
+    pub fn new_with_config(kv_store: KvStore, config: InfrastructureConfig, env: Env) -> Self {
         Self {
             config,
             kv_store,
@@ -267,10 +291,16 @@ impl InfrastructureEngine {
             notification_engine: None,
             data_access_layer: None,
             metrics_collector: None,
+            #[cfg(feature = "advanced_sync")]
+            data_synchronization_engine: None,
             services: Arc::new(Mutex::new(HashMap::new())),
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
             startup_time: SystemTime::now(),
             global_config: Arc::new(Mutex::new(HashMap::new())),
+            service_health_map: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            feature_flags: Arc::new(FeatureFlag::default()),
+            logger: Arc::new(Logger::default()),
+            env,
         }
     }
 
@@ -516,6 +546,49 @@ impl InfrastructureEngine {
         })
         .await?;
 
+        // 7. Initialize data synchronization engine
+        #[cfg(feature = "advanced_sync")]
+        {
+            let data_sync_config = DataSynchronizationConfig::default();
+            let mut data_sync_engine =
+                DataSynchronizationEngine::new(env, data_sync_config).await?;
+            data_sync_engine.initialize().await?;
+            self.data_synchronization_engine = Some(data_sync_engine);
+            self.register_service(ServiceRegistration {
+                service_name: "data_synchronization_engine".to_string(),
+                service_type: ServiceType::Custom("DataSync".to_string()),
+                version: "1.0.0".to_string(),
+                description:
+                    "Comprehensive data synchronization across Cloudflare services with fault tolerance"
+                        .to_string(),
+                dependencies: vec![
+                    ServiceDependency {
+                        service_name: "cache_manager".to_string(),
+                        service_type: ServiceType::Cache,
+                        is_critical: true,
+                        timeout_ms: 5000,
+                        retry_attempts: 3,
+                        health_check_interval_seconds: 30,
+                    },
+                    ServiceDependency {
+                        service_name: "database_core".to_string(),
+                        service_type: ServiceType::Database,
+                        is_critical: true,
+                        timeout_ms: 10000,
+                        retry_attempts: 3,
+                        health_check_interval_seconds: 30,
+                    },
+                ],
+                health_check_endpoint: None,
+                metrics_enabled: true,
+                auto_recovery: true,
+                priority: 2, // High priority for data consistency
+                tags: HashMap::new(),
+                configuration: HashMap::new(),
+            })
+            .await?;
+        }
+
         // Start health monitoring if enabled
         if self.config.enable_health_monitoring {
             self.start_health_monitoring().await?;
@@ -685,10 +758,32 @@ impl InfrastructureEngine {
         Ok(())
     }
 
+    /// Get data synchronization engine reference
+    #[cfg(feature = "advanced_sync")]
+    pub fn get_data_synchronization_engine(&self) -> Option<&DataSynchronizationEngine> {
+        self.data_synchronization_engine.as_ref()
+    }
+
+    #[cfg(not(feature = "advanced_sync"))]
+    pub fn get_data_synchronization_engine(&self) -> Option<&()> {
+        None
+    }
+
     /// Graceful shutdown of all services
     pub async fn shutdown(&self) -> ArbitrageResult<()> {
         if !self.config.enable_graceful_shutdown {
             return Ok(());
+        }
+
+        // Shutdown data synchronization engine first to ensure data consistency
+        #[cfg(feature = "advanced_sync")]
+        if let Some(data_sync_engine) = &self.data_synchronization_engine {
+            if let Err(e) = data_sync_engine.shutdown().await {
+                console_log!(
+                    "Warning: Failed to shutdown data synchronization engine: {:?}",
+                    e
+                );
+            }
         }
 
         // Update all services to stopped status

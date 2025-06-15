@@ -50,8 +50,8 @@ This project implements a modular, production-ready architecture:
    # Install Rust dependencies
    cargo build
 
-   # Install Wrangler globally
-   npm install -g wrangler@latest
+   # Install Wrangler using pnpm
+pnpm add -D wrangler@latest
 
    # Add WASM target
    rustup target add wasm32-unknown-unknown
@@ -109,10 +109,10 @@ Production feature flags in `feature_flags.json`:
 make ci
 
 # Local development server
-   wrangler dev
+   pnpm dev
 
 # Monitor logs
-wrangler tail
+pnpm wrangler tail
    ```
 
 ### Production Deployment
@@ -122,7 +122,7 @@ wrangler tail
 ./scripts/deploy.sh
 
 # Manual deployment
-   wrangler deploy
+   pnpm deploy
    ```
 
 ## 📡 API Endpoints
@@ -204,10 +204,10 @@ cargo test --release performance
 ### Production Logging
 ```bash
 # Monitor production logs
-wrangler tail
+pnpm wrangler tail
 
 # Filter by log level
-wrangler tail --format=pretty | grep ERROR
+pnpm wrangler tail --format=pretty | grep ERROR
 ```
 
 ### Performance Metrics

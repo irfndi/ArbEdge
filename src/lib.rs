@@ -1,4 +1,3 @@
-use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use worker::*;
 
@@ -48,21 +47,20 @@ pub mod utils;
 #[cfg(test)]
 pub mod test_utils;
 
-use services::core::infrastructure::database_repositories::DatabaseManager;
-use services::core::infrastructure::database_repositories::DatabaseManagerConfig;
+use services::core::infrastructure::database_repositories::database_manager::{
+    DatabaseManager, DatabaseManagerConfig,
+};
 use services::core::infrastructure::service_container::ServiceContainer;
-// use services::core::opportunities::opportunity::OpportunityServiceConfig; // Removed - using modular architecture
-// use services::core::opportunities::OpportunityService; // Removed - using modular architecture
-// Legacy trading imports removed - functionality moved to modular services
-use services::core::user::user_profile::UserProfileService;
-// use services::interfaces::telegram::telegram::{TelegramConfig, TelegramService}; // Removed unused imports
 
 // Import new modular components
 use handlers::*;
 
 use types::ExchangeIdEnum;
-use utils::{ArbitrageError, ArbitrageResult};
+use utils::{add_cache_headers, cache_type_from_path, ArbitrageError, ArbitrageResult};
 use worker::kv::KvStore;
+
+// Import required services
+use services::core::user::UserProfileService;
 
 #[cfg(target_arch = "wasm32")]
 use wee_alloc;
@@ -77,50 +75,69 @@ macro_rules! console_log {
     };
 }
 
-static SERVICE_CONTAINER: OnceCell<Arc<ServiceContainer>> = OnceCell::new();
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static SERVICE_CONTAINER: std::cell::RefCell<Option<Arc<ServiceContainer>>> =
+        std::cell::RefCell::new(None);
+}
 
-async fn get_service_container(env: &Env) -> Result<Arc<ServiceContainer>> {
-    // Check if service container already exists
-    if let Some(container) = SERVICE_CONTAINER.get() {
-        return Ok(container.clone());
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
+
+#[cfg(not(target_arch = "wasm32"))]
+static SERVICE_CONTAINER: OnceLock<Arc<ServiceContainer>> = OnceLock::new();
+
+async fn get_service_container(env: &worker::Env) -> Result<Arc<ServiceContainer>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Check if we already have a cached container
+        let existing = SERVICE_CONTAINER.with(|container| container.borrow().clone());
+
+        if let Some(container) = existing {
+            return Ok(container);
+        }
+
+        // Create new container for WASM without tokio
+        let kv_store = env.kv("ArbEdgeKV")?;
+        let d1 = env.d1("ArbEdgeD1")?;
+        let _database_manager =
+            DatabaseManager::new(Arc::new(d1), DatabaseManagerConfig::default());
+
+        let new_container = Arc::new(ServiceContainer::new(env, kv_store).await?);
+
+        // Cache it for future use
+        SERVICE_CONTAINER.with(|container| {
+            container.replace(Some(new_container.clone()));
+        });
+
+        Ok(new_container)
     }
 
-    let kv_store = env.kv("ArbEdgeKV")?;
-    let d1 = env.d1("ArbEdgeD1")?;
-    let _database_manager = DatabaseManager::new(Arc::new(d1), DatabaseManagerConfig::default());
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let Some(container) = SERVICE_CONTAINER.get() {
+            return Ok(container.clone());
+        }
 
-    // These services are initialized and managed by the ServiceContainer
-    // let _user_profile_service =
-    //     UserProfileService::new(kv_store.clone(), database_manager, encryption_key);
-    //
-    // let _telegram_service = TelegramService::new(TelegramConfig {
-    //     bot_token: env
-    //         .var("TELEGRAM_BOT_TOKEN")
-    //         .map_err(|_| worker::Error::RustError("Missing TELEGRAM_BOT_TOKEN".to_string()))?
-    //         .to_string(),
-    //     chat_id: env
-    //         .var("TELEGRAM_CHAT_ID")
-    //         .map(|s| s.to_string())
-    //         .unwrap_or_else(|_| "".to_string()),
-    //     is_test_mode: env
-    //         .var("TELEGRAM_TEST_MODE")
-    //         .map(|s| s.to_string())
-    //         .unwrap_or_else(|_| "false".to_string())
-    //         == "true",
-    // });
-    //
-    // let _exchange_service = ExchangeService::new(env)?;
-    // #[cfg(target_arch = "wasm32")]
-    // let _positions_service = ProductionPositionsService::new(Arc::new(kv_store.clone()));
+        let kv_store = env.kv("ArbEdgeKV")?;
+        let d1 = env.d1("ArbEdgeD1")?;
+        let _database_manager =
+            DatabaseManager::new(Arc::new(d1), DatabaseManagerConfig::default());
 
-    let container = Arc::new(ServiceContainer::new(env, kv_store).await?);
+        // Initialize the service container ONCE
+        let container = Arc::new(ServiceContainer::new(env, kv_store).await?);
 
-    SERVICE_CONTAINER
-        .set(container.clone())
-        .map_err(|_| worker::Error::RustError("Failed to set service container".to_string()))?;
-
-    Ok(container)
+        match SERVICE_CONTAINER.set(container.clone()) {
+            Ok(()) => Ok(container),
+            Err(_) => {
+                // Another thread beat us to it, return the existing one
+                Ok(SERVICE_CONTAINER.get().unwrap().clone())
+            }
+        }
+    }
 }
+
+// Removed get_telegram_service function - now using ServiceContainer's telegram service
 
 // ============================================================================
 // MODULAR ROUTING FUNCTIONS - Production Ready Implementation
@@ -439,49 +456,12 @@ async fn route_opportunities_request(
     }
 }
 
-// Static cache for ModularTelegramService to avoid re-initialization on every webhook request
-static MODULAR_TELEGRAM_SERVICE: OnceCell<
-    Arc<crate::services::interfaces::telegram::ModularTelegramService>,
-> = OnceCell::new();
-
-/// Lazily initialize and retrieve the global ModularTelegramService instance.
-///
-/// * Avoids expensive re-initialization on each request.
-/// * Ensures shared state is reused across concurrent webhook invocations.
-async fn get_modular_telegram_service(
-    env: &Env,
-    container: Arc<ServiceContainer>,
-) -> ArbitrageResult<Arc<crate::services::interfaces::telegram::ModularTelegramService>> {
-    if let Some(service) = MODULAR_TELEGRAM_SERVICE.get() {
-        return Ok(service.clone());
-    }
-
-    // Create a new instance if not already initialized
-    let service = Arc::new(
-        crate::services::interfaces::telegram::ModularTelegramService::new(env, container)
-            .await
-            .map_err(|e| {
-                ArbitrageError::configuration_error(format!(
-                    "Failed to initialize ModularTelegramService: {:?}",
-                    e
-                ))
-            })?,
-    );
-
-    // It is safe to ignore the error here because it only occurs if another
-    // concurrent request has already set the value between the previous check
-    // and this point.
-    let _ = MODULAR_TELEGRAM_SERVICE.set(service.clone());
-
-    Ok(service)
-}
-
 /// Route telegram requests to modular telegram service
 async fn route_telegram_request(
     req: Request,
     container: &Arc<ServiceContainer>,
     action: &str,
-    env: &Env,
+    _env: &worker::Env,
 ) -> Result<Response> {
     console_log!("📱 Routing telegram request: {}", action);
 
@@ -491,25 +471,21 @@ async fn route_telegram_request(
             let mut req_clone = req;
             let webhook_data: serde_json::Value = req_clone.json().await?;
 
-            // Process webhook using ModularTelegramService
-            let modular_service = match get_modular_telegram_service(env, container.clone()).await {
-                Ok(service) => service,
-                Err(e) => {
-                    console_log!("⚠️ Failed to initialize ModularTelegramService: {:?}", e);
-                    return Response::error("Telegram service not available", 503);
-                }
-            };
-
-            let response_text =
-                modular_service
+            // Process webhook using ModularTelegramService from ServiceContainer
+            if let Some(telegram_service) = &container.telegram_service {
+                let response_text = telegram_service
                     .handle_webhook(webhook_data)
                     .await
                     .map_err(|e| {
                         worker::Error::RustError(format!("Failed to process webhook: {:?}", e))
                     })?;
 
-            // Return plain text response for Telegram webhook
-            Response::ok(&response_text)
+                // Return plain text response for Telegram webhook
+                Response::ok(&response_text)
+            } else {
+                console_log!("❌ Telegram service not available in ServiceContainer");
+                Response::error("Telegram service not available", 503)
+            }
         }
         "send" => {
             // Parse send message request
@@ -630,7 +606,7 @@ pub struct PositionsManager {
 
 #[durable_object]
 impl DurableObject for PositionsManager {
-    fn new(state: State, _env: Env) -> Self {
+    fn new(state: State, _env: worker::Env) -> Self {
         Self { _state: state }
     }
 
@@ -640,7 +616,7 @@ impl DurableObject for PositionsManager {
 }
 
 #[event(fetch)]
-pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+pub async fn main(req: Request, env: worker::Env, _ctx: Context) -> Result<Response> {
     utils::logger::set_panic_hook();
 
     let url = req.url()?;
@@ -665,6 +641,9 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     if method == Method::Options {
         return Ok(Response::empty()?.with_headers(cors_headers));
     }
+
+    // Determine cache type for this request
+    let cache_type = cache_type_from_path(path);
 
     let mut response = match (method.clone(), path) {
         // Test endpoint without ServiceContainer to isolate issues
@@ -747,9 +726,11 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         }
     };
 
-    // Add CORS headers to response
+    // Add comprehensive headers to response
     if let Ok(ref mut resp) = response {
         let headers = resp.headers_mut();
+
+        // Add CORS headers
         headers.set("Access-Control-Allow-Origin", "*")?;
         headers.set(
             "Access-Control-Allow-Methods",
@@ -759,13 +740,21 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             "Access-Control-Allow-Headers",
             "Content-Type, Authorization, X-User-ID",
         )?;
+
+        // Add cache headers based on endpoint type
+        if let Err(e) = add_cache_headers(resp, cache_type) {
+            console_log!("⚠️ Failed to add cache headers: {:?}", e);
+            // Continue without cache headers rather than failing the request
+        } else {
+            console_log!("✅ Added cache headers for {}: {:?}", path, cache_type);
+        }
     }
 
     response
 }
 
 #[event(scheduled)]
-pub async fn scheduled(event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+pub async fn scheduled(event: ScheduledEvent, env: worker::Env, _ctx: ScheduleContext) {
     console_log!("🕐 Scheduled event triggered: {:?}", event.cron());
 
     if let Err(e) = monitor_opportunities_scheduled(env).await {
@@ -815,7 +804,7 @@ fn parse_exchanges_from_env(
 // Legacy handlers removed - all functionality moved to modular services
 
 async fn run_five_minute_maintenance(
-    env: &Env,
+    env: &worker::Env,
     // _opportunity_service: &OpportunityService,
 ) -> ArbitrageResult<()> {
     console_log!("🔧 Running 5-minute maintenance tasks...");
@@ -1239,7 +1228,7 @@ async fn cleanup_expired_sessions(
     Ok(cleaned_sessions)
 }
 
-async fn monitor_opportunities_scheduled(env: Env) -> ArbitrageResult<()> {
+async fn monitor_opportunities_scheduled(env: worker::Env) -> ArbitrageResult<()> {
     console_log!("🔄 Starting scheduled opportunity monitoring...");
 
     // Initialize service container to access opportunity engine
@@ -1251,23 +1240,19 @@ async fn monitor_opportunities_scheduled(env: Env) -> ArbitrageResult<()> {
     match service_container.opportunity_engine {
         Some(ref opportunity_engine) => {
             console_log!("⚠️ DEBUG: About to call generate_global_opportunities");
-            match opportunity_engine.generate_global_opportunities(None).await {
+            match opportunity_engine.generate_global_opportunities().await {
                 Ok(opportunities) => {
                     console_log!("✅ Generated {} global opportunities", opportunities.len());
 
                     // Distribute the opportunities using the distribution service
                     let distribution_service = &service_container.distribution_service;
                     let mut distributed_count = 0;
-                    for global_opp in opportunities {
-                        // Convert GlobalOpportunity to ArbitrageOpportunity for distribution
-                        if let crate::types::OpportunityData::Arbitrage(arb_opp) =
-                            global_opp.opportunity_data
-                        {
-                            match distribution_service.distribute_opportunity(arb_opp).await {
-                                Ok(count) => distributed_count += count,
-                                Err(e) => {
-                                    console_log!("⚠️ Failed to distribute opportunity: {:?}", e);
-                                }
+                    for arb_opp in opportunities {
+                        // ArbitrageOpportunity can be distributed directly
+                        match distribution_service.distribute_opportunity(arb_opp).await {
+                            Ok(count) => distributed_count += count,
+                            Err(e) => {
+                                console_log!("⚠️ Failed to distribute opportunity: {:?}", e);
                             }
                         }
                     }
@@ -1294,7 +1279,7 @@ async fn monitor_opportunities_scheduled(env: Env) -> ArbitrageResult<()> {
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-pub async fn initialize_services(env: Env) -> ServiceContainer {
+pub async fn initialize_services(env: worker::Env) -> ServiceContainer {
     let kv = env.kv("ArbEdgeKV").expect("KV binding not found");
 
     let container = ServiceContainer::new(&env, kv)

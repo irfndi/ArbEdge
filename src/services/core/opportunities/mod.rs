@@ -12,6 +12,11 @@ pub mod opportunity_engine; // Renamed from opportunity_models
 pub mod opportunity_validity_engine;
 pub mod trade_target_calculator;
 
+// Strategic enhancement modules
+pub mod funding_rate_manager;
+pub mod historical_data_manager;
+pub mod opportunity_scoring_engine;
+
 // Legacy services (still needed)
 pub mod opportunity_distribution;
 
@@ -27,6 +32,17 @@ pub use opportunity_core::{OpportunityConfig, OpportunityContext, OpportunityUti
 pub use opportunity_engine::OpportunityEngine; // Renamed from opportunity_models
 pub use opportunity_validity_engine::OpportunityValidityEngine;
 pub use trade_target_calculator::TradeTargetCalculator;
+
+// Re-export strategic enhancement modules
+pub use funding_rate_manager::{
+    FundingRate, FundingRateArbitrage, FundingRateManager, FundingRateNotification,
+};
+pub use historical_data_manager::{
+    HistoricalDataManager, HistoricalOpportunity, OpportunityAnalytics, PerformanceMetrics,
+};
+pub use opportunity_scoring_engine::{
+    OpportunitiesSummary, OpportunityScore, OpportunityScoringEngine, ScoringWeights, SymbolSummary,
+};
 
 // Re-export remaining legacy service for backward compatibility
 pub use opportunity_distribution::OpportunityDistributionService;

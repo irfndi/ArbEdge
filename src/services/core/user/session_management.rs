@@ -6,10 +6,73 @@ use crate::types::{
 use crate::utils::{ArbitrageError, ArbitrageResult};
 
 use serde_json::{self};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use worker::console_log;
 use worker::wasm_bindgen::JsValue;
+
+/// Optimized session cache for high-performance session management
+#[derive(Clone)]
+struct SessionCache {
+    /// In-memory cache for current request (fastest)
+    memory_cache: Arc<std::sync::RwLock<HashMap<i64, (EnhancedUserSession, u64)>>>,
+    /// Cache TTL in seconds (default: 300 seconds = 5 minutes)
+    cache_ttl: u64,
+}
+
+impl SessionCache {
+    fn new() -> Self {
+        Self {
+            memory_cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            cache_ttl: 300, // 5 minutes
+        }
+    }
+
+    fn get(&self, telegram_id: i64) -> Option<EnhancedUserSession> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        if let Ok(cache) = self.memory_cache.read() {
+            if let Some((session, timestamp)) = cache.get(&telegram_id) {
+                if now - timestamp < self.cache_ttl {
+                    return Some(session.clone());
+                }
+            }
+        }
+        None
+    }
+
+    fn set(&self, telegram_id: i64, session: EnhancedUserSession) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        if let Ok(mut cache) = self.memory_cache.write() {
+            cache.insert(telegram_id, (session, now));
+        }
+    }
+
+    fn invalidate(&self, telegram_id: i64) {
+        if let Ok(mut cache) = self.memory_cache.write() {
+            cache.remove(&telegram_id);
+        }
+    }
+
+    fn cleanup_expired(&self) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        if let Ok(mut cache) = self.memory_cache.write() {
+            cache.retain(|_, (_, timestamp)| now - *timestamp < self.cache_ttl);
+        }
+    }
+}
 
 /// Comprehensive session management service for user lifecycle tracking
 /// and push notification eligibility management
@@ -18,6 +81,8 @@ pub struct SessionManagementService {
     d1_service: Arc<DatabaseManager>,
     kv_service: Arc<worker::kv::KvStore>,
     config: SessionConfig,
+    /// High-performance in-memory cache for current request
+    session_cache: SessionCache,
 }
 
 impl SessionManagementService {
@@ -26,6 +91,7 @@ impl SessionManagementService {
             d1_service: Arc::new(d1_service),
             kv_service: Arc::new(kv_service),
             config: SessionConfig::default(),
+            session_cache: SessionCache::new(),
         }
     }
 
@@ -732,6 +798,150 @@ impl SessionManagementService {
 
         // If no analytics found, return empty vector
         Ok(analytics)
+    }
+
+    /// High-performance session validation with multi-tier caching
+    /// This method is optimized for high-frequency calls (every Telegram request)
+    pub async fn validate_session_optimized(
+        &self,
+        telegram_id: i64,
+    ) -> ArbitrageResult<Option<EnhancedUserSession>> {
+        // Tier 1: Check in-memory cache first (fastest)
+        if let Some(cached_session) = self.session_cache.get(telegram_id) {
+            if cached_session.is_active() {
+                console_log!(
+                    "SessionManagementService: Session found in memory cache for Telegram ID {}",
+                    telegram_id
+                );
+                return Ok(Some(cached_session));
+            } else {
+                // Session expired, invalidate cache
+                self.session_cache.invalidate(telegram_id);
+            }
+        }
+
+        // Tier 2: Check KV cache (fast)
+        let cache_key = format!("session_cache:{}", telegram_id);
+        if let Ok(Some(cached_data)) = self.kv_service.get(&cache_key).text().await {
+            if let Ok(session) = serde_json::from_str::<EnhancedUserSession>(&cached_data) {
+                if session.is_active() {
+                    console_log!(
+                        "SessionManagementService: Session found in KV cache for Telegram ID {}",
+                        telegram_id
+                    );
+                    // Cache in memory for future requests
+                    self.session_cache.set(telegram_id, session.clone());
+                    return Ok(Some(session));
+                }
+            }
+        }
+
+        // Tier 3: Fallback to database (slowest)
+        console_log!(
+            "SessionManagementService: Session not found in caches, checking database for Telegram ID {}",
+            telegram_id
+        );
+
+        match self.get_session_by_telegram_id_direct(telegram_id).await {
+            Ok(session) => {
+                if session.is_active() {
+                    // Cache in both KV and memory for future requests
+                    self.cache_session(&session).await?;
+                    self.session_cache.set(telegram_id, session.clone());
+                    Ok(Some(session))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) if e.error_code.as_deref() == Some("SESSION_NOT_FOUND") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Optimized activity update with intelligent caching
+    /// Only updates database if significant time has passed since last update
+    pub async fn update_activity_optimized(&self, telegram_id: i64) -> ArbitrageResult<()> {
+        // Get current session from cache first
+        let mut session = match self.session_cache.get(telegram_id) {
+            Some(cached_session) => cached_session,
+            None => {
+                // If not in cache, validate first (this will cache it)
+                match self.validate_session_optimized(telegram_id).await? {
+                    Some(session) => session,
+                    None => {
+                        return Err(ArbitrageError::session_not_found(telegram_id.to_string()));
+                    }
+                }
+            }
+        };
+
+        let now = chrono::Utc::now();
+        let last_activity_timestamp = session.last_activity_at;
+        let last_activity = chrono::DateTime::from_timestamp_millis(last_activity_timestamp as i64)
+            .unwrap_or_else(chrono::Utc::now);
+
+        // Only update database if more than 5 minutes have passed since last update
+        // This reduces database writes significantly for active users
+        let should_update_db = now.signed_duration_since(last_activity).num_minutes() >= 5;
+
+        // Always update the session object
+        session.update_activity();
+
+        // Update memory cache immediately
+        self.session_cache.set(telegram_id, session.clone());
+
+        if should_update_db {
+            console_log!(
+                "SessionManagementService: Updating database for Telegram ID {} (5+ minutes since last update)",
+                telegram_id
+            );
+            // Update database and KV cache
+            self.update_session(&session).await?;
+            self.cache_session(&session).await?;
+        } else {
+            console_log!(
+                "SessionManagementService: Skipping database update for Telegram ID {} (recent activity)",
+                telegram_id
+            );
+            // Only update KV cache for cross-request consistency
+            self.cache_session(&session).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Direct database lookup without caching (used internally)
+    async fn get_session_by_telegram_id_direct(
+        &self,
+        telegram_id: i64,
+    ) -> ArbitrageResult<EnhancedUserSession> {
+        let stmt = self.d1_service.prepare(
+            "SELECT * FROM user_sessions WHERE telegram_id = ? AND session_state = 'active' ORDER BY created_at DESC LIMIT 1"
+        );
+
+        // Validate telegram_id is within JavaScript safe integer range
+        Self::validate_telegram_id_for_js(telegram_id)?;
+
+        let result = stmt
+            .bind(&[JsValue::from_f64(telegram_id as f64)])
+            .map_err(|e| {
+                ArbitrageError::database_error(format!("Failed to bind parameters: {}", e))
+            })?
+            .first::<std::collections::HashMap<String, serde_json::Value>>(None)
+            .await
+            .map_err(|e| {
+                ArbitrageError::database_error(format!("Failed to execute query: {}", e))
+            })?;
+
+        match result {
+            Some(row) => self.row_to_session(row),
+            None => Err(ArbitrageError::session_not_found(telegram_id.to_string())),
+        }
+    }
+
+    /// Cleanup expired sessions from memory cache
+    pub fn cleanup_memory_cache(&self) {
+        self.session_cache.cleanup_expired();
     }
 
     // Private helper methods

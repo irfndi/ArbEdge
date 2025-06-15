@@ -123,6 +123,7 @@ dependencies = [
  "hmac",
  "http",
  "js-sys",
+ "lazy_static",
  "log",
  "md5",
  "mockall",
