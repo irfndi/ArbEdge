@@ -44,10 +44,11 @@ pub struct ErrorTrackingParams {
     pub request_id: Option<String>,
     pub severity: String,
 }
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use worker::console_log;
 
 /// Opportunity generation pipeline stages for detailed tracking
@@ -229,7 +230,7 @@ impl OpportunityMonitor {
                     api_calls_count: 0,
                     database_queries_count: 0,
                     cache_operations_count: 0,
-                    timestamp: SystemTime::now()
+                    timestamp: now_system_time()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
                         .as_millis() as u64,
@@ -305,7 +306,7 @@ impl OpportunityMonitor {
             response_time_ms,
             success,
             error_message: error_message.clone(),
-            timestamp: SystemTime::now()
+            timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,
@@ -400,7 +401,7 @@ impl OpportunityMonitor {
             initialization_time_ms,
             success,
             error_message: error_message.clone(),
-            timestamp: SystemTime::now()
+            timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,
@@ -446,7 +447,7 @@ impl OpportunityMonitor {
                 .filter(|init| {
                     init.service_name == service_name
                         && init.timestamp
-                            > SystemTime::now()
+                            > now_system_time()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
                                 .as_millis() as u64
@@ -489,7 +490,7 @@ impl OpportunityMonitor {
 
         // Update last generation timestamp
         if let Ok(mut last_gen) = self.last_opportunity_generation.lock() {
-            *last_gen = SystemTime::now()
+            *last_gen = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64;
@@ -541,7 +542,7 @@ impl OpportunityMonitor {
             cache_hits,
             cache_misses,
             pipeline_duration_ms,
-            timestamp: SystemTime::now()
+            timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,
@@ -651,7 +652,7 @@ impl OpportunityMonitor {
             exchange: exchange.clone(),
             symbol: symbol.clone(),
             request_id: request_id.clone(),
-            timestamp: SystemTime::now()
+            timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,
@@ -773,7 +774,7 @@ impl OpportunityMonitor {
         }
 
         Ok(serde_json::json!({
-            "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis(),
+            "timestamp": now_system_time().duration_since(UNIX_EPOCH).unwrap().as_millis(),
             "api_metrics": {
                 "total_calls": total_api_calls,
                 "success_rate_percent": api_success_rate,

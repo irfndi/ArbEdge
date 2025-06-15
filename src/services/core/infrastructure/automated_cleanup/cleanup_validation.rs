@@ -1,6 +1,7 @@
+use crate::utils::now_system_time;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -416,9 +417,9 @@ pub struct ValidationSuite {
     /// Suite configuration
     pub config: ValidationSuiteConfig,
     /// Created timestamp
-    pub created_at: SystemTime,
+    pub created_at: u64,
     /// Updated timestamp
-    pub updated_at: SystemTime,
+    pub updated_at: u64,
 }
 
 /// Validation test case
@@ -548,9 +549,9 @@ pub struct ValidationResult {
     /// Overall metrics
     pub metrics: ValidationMetrics,
     /// Started timestamp
-    pub started_at: SystemTime,
+    pub started_at: u64,
     /// Completed timestamp
-    pub completed_at: Option<SystemTime>,
+    pub completed_at: Option<u64>,
     /// Error information
     pub error: Option<ValidationError>,
 }
@@ -665,7 +666,7 @@ pub struct ValidationError {
     /// Error details
     pub details: Option<serde_json::Value>,
     /// Error timestamp
-    pub timestamp: SystemTime,
+    pub timestamp: u64,
 }
 
 /// Main cleanup validator
@@ -727,7 +728,7 @@ impl CleanupValidator {
         }
 
         let validation_id = Uuid::new_v4();
-        let started_at = SystemTime::now();
+        let started_at = now_system_time();
 
         // Initialize validation result
         let mut result = ValidationResult {
@@ -769,7 +770,7 @@ impl CleanupValidator {
         }
 
         // Finalize result
-        let completed_at = SystemTime::now();
+        let completed_at = now_system_time();
         result.completed_at = Some(completed_at);
         result.status = if result.metrics.tests_failed > 0 {
             ValidationStatus::Failed
@@ -815,7 +816,7 @@ impl CleanupValidator {
         &self,
         test_case: &ValidationTestCase,
     ) -> crate::utils::error::ArbitrageResult<TestResult> {
-        let start_time = SystemTime::now();
+        let start_time = now_system_time();
         
         let mut test_result = TestResult {
             test_case_id: test_case.id,
@@ -870,7 +871,7 @@ impl CleanupValidator {
         }
 
         // Calculate execution duration
-        test_result.execution_duration = SystemTime::now()
+        test_result.execution_duration = now_system_time()
             .duration_since(start_time)
             .unwrap_or(Duration::from_secs(0));
 

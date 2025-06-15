@@ -2,6 +2,8 @@
 // Task 1.5: Trading focus selection and automation preferences management
 
 use crate::services::core::infrastructure::DatabaseManager;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::utils::now_system_time;
 use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -117,7 +119,7 @@ impl UserTradingPreferences {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -162,7 +164,7 @@ impl UserTradingPreferences {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.updated_at = std::time::SystemTime::now()
+            self.updated_at = now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
@@ -208,7 +210,7 @@ impl UserTradingPreferences {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.updated_at = std::time::SystemTime::now()
+            self.updated_at = now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
@@ -399,7 +401,7 @@ impl UserTradingPreferencesService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            std::time::SystemTime::now()
+            now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64
@@ -491,7 +493,7 @@ impl UserTradingPreferencesService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            preferences.updated_at = std::time::SystemTime::now()
+            preferences.updated_at = now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
@@ -520,7 +522,7 @@ impl UserTradingPreferencesService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            preferences.updated_at = std::time::SystemTime::now()
+            preferences.updated_at = now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
@@ -628,7 +630,7 @@ impl UserTradingPreferencesService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            preferences.updated_at = std::time::SystemTime::now()
+            preferences.updated_at = now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;

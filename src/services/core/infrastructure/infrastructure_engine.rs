@@ -1,6 +1,7 @@
 // Infrastructure Engine Module - Main Orchestrator for All Infrastructure Services
 // Provides service discovery, dependency management, configuration, and health monitoring
 
+use crate::utils::now_system_time;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 #[cfg(target_arch = "wasm32")]
 use parking_lot::Mutex;
@@ -271,7 +272,7 @@ impl InfrastructureEngine {
             data_synchronization_engine: None,
             services: Arc::new(Mutex::new(HashMap::new())),
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
-            startup_time: SystemTime::now(),
+            startup_time: now_system_time(),
             global_config: Arc::new(Mutex::new(HashMap::new())),
             service_health_map: Arc::new(std::sync::RwLock::new(HashMap::new())),
             feature_flags: Arc::new(FeatureFlag::default()),
@@ -295,7 +296,7 @@ impl InfrastructureEngine {
             data_synchronization_engine: None,
             services: Arc::new(Mutex::new(HashMap::new())),
             circuit_breakers: Arc::new(Mutex::new(HashMap::new())),
-            startup_time: SystemTime::now(),
+            startup_time: now_system_time(),
             global_config: Arc::new(Mutex::new(HashMap::new())),
             service_health_map: Arc::new(std::sync::RwLock::new(HashMap::new())),
             feature_flags: Arc::new(FeatureFlag::default()),
@@ -677,7 +678,7 @@ impl InfrastructureEngine {
             ServiceStatus::Healthy
         };
 
-        let _uptime_seconds = SystemTime::now()
+        let _uptime_seconds = now_system_time()
             .duration_since(self.startup_time)
             .unwrap_or_default()
             .as_secs();
@@ -712,7 +713,7 @@ impl InfrastructureEngine {
             service.last_health_check = Some(chrono::Utc::now().timestamp_millis() as u64);
 
             // Update uptime
-            service.uptime_seconds = SystemTime::now()
+            service.uptime_seconds = now_system_time()
                 .duration_since(self.startup_time)
                 .unwrap_or_default()
                 .as_secs();
@@ -871,7 +872,7 @@ impl InfrastructureEngine {
 
     pub async fn get_detailed_health_status(&self) -> SystemHealthReport {
         // Placeholder - replace with actual health check logic
-        let uptime_seconds = SystemTime::now()
+        let uptime_seconds = now_system_time()
             .duration_since(self.startup_time)
             .unwrap_or_default()
             .as_secs();

@@ -9,6 +9,7 @@ use crate::services::core::infrastructure::{
     },
     shared_types::ComponentHealth,
 };
+use crate::utils::now_system_time;
 use futures::channel::{mpsc, oneshot};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -500,7 +501,7 @@ impl RealTimeAlertingSystem {
             stats.percentiles.insert(percentile, sorted_values[index]);
         }
 
-        stats.last_updated = SystemTime::now();
+        stats.last_updated = now_system_time();
     }
 
     /// Correlate alert with existing alerts
@@ -509,7 +510,7 @@ impl RealTimeAlertingSystem {
         alert: &Alert,
     ) -> Result<CorrelationResult, Box<dyn std::error::Error + Send + Sync>> {
         let alerts_lock = self.alerts.read().unwrap();
-        let now = SystemTime::now();
+        let now = now_system_time();
 
         // Check for deduplication (exact same alert within deduplication window)
         for existing_alert in alerts_lock.values() {
@@ -579,7 +580,7 @@ impl RealTimeAlertingSystem {
             let mut alerts_lock = self.alerts.write().unwrap();
             if let Some(alert) = alerts_lock.get_mut(&alert_id) {
                 alert.fire_count += 1;
-                alert.updated_at = SystemTime::now();
+                alert.updated_at = now_system_time();
 
                 // Send notification for repeated fires (configurable threshold)
                 if alert.fire_count % 5 == 0 {
@@ -624,7 +625,7 @@ impl RealTimeAlertingSystem {
     /// Check if alert should be suppressed
     async fn is_alert_suppressed(&self, alert: &Alert) -> bool {
         let suppression_rules = self.suppression_rules.read().unwrap();
-        let now = SystemTime::now();
+        let now = now_system_time();
 
         for rule in suppression_rules.values() {
             if now >= rule.start_time && now <= rule.end_time {
@@ -671,7 +672,7 @@ impl RealTimeAlertingSystem {
                             target: target.clone(),
                             status: "sent".to_string(),
                             attempt: 1,
-                            sent_at: Some(SystemTime::now()),
+                            sent_at: Some(now_system_time()),
                             error: None,
                         };
 
@@ -705,9 +706,9 @@ impl RealTimeAlertingSystem {
                     let mut alerts = self.alerts.write().unwrap();
                     if let Some(alert) = alerts.get_mut(&alert_id) {
                         alert.state = AlertState::Acknowledged;
-                        alert.acknowledged_at = Some(SystemTime::now());
+                        alert.acknowledged_at = Some(now_system_time());
                         alert.acknowledged_by = Some(acknowledged_by);
-                        alert.updated_at = SystemTime::now();
+                        alert.updated_at = now_system_time();
                     }
                 }
                 AlertingCommand::ResolveAlert {
@@ -717,8 +718,8 @@ impl RealTimeAlertingSystem {
                     let mut alerts = self.alerts.write().unwrap();
                     if let Some(alert) = alerts.get_mut(&alert_id) {
                         alert.state = AlertState::Resolved;
-                        alert.resolved_at = Some(SystemTime::now());
-                        alert.updated_at = SystemTime::now();
+                        alert.resolved_at = Some(now_system_time());
+                        alert.updated_at = now_system_time();
                     }
                 }
                 AlertingCommand::GetAlertStatus { alert_id, response } => {
@@ -779,7 +780,7 @@ impl RealTimeAlertingSystem {
     /// Process alert escalations
     #[allow(dead_code)]
     async fn process_escalations(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let now = SystemTime::now();
+        let now = now_system_time();
         let mut alerts_to_escalate = Vec::new();
 
         {
@@ -826,7 +827,7 @@ impl RealTimeAlertingSystem {
             if let Some(alert) = alerts.get_mut(&alert_id) {
                 alert.escalation_level += 1;
                 alert.state = AlertState::Escalated;
-                alert.updated_at = SystemTime::now();
+                alert.updated_at = now_system_time();
 
                 // Send notifications for escalated level
                 Some(alert.clone())
@@ -857,7 +858,7 @@ impl RealTimeAlertingSystem {
     /// Clean up old resolved alerts and metrics
     #[allow(dead_code)]
     async fn cleanup_old_data(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let now = SystemTime::now();
+        let now = now_system_time();
         let retention_cutoff = now - self.config.metrics_retention;
 
         // Clean up old alerts
@@ -941,7 +942,7 @@ impl RealTimeAlertingSystem {
         ComponentHealth::new(
             is_healthy,
             "RealTimeAlertingSystem".to_string(),
-            SystemTime::now()
+            now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),

@@ -1,6 +1,7 @@
 // Unified Alert System - Consolidates alert functionality to eliminate duplication
 // Combines features from alert_manager.rs and real_time_alerting_system.rs
 
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -192,7 +193,7 @@ impl UnifiedAlert {
         threshold: f64,
         condition: AlertCondition,
     ) -> Self {
-        let now = SystemTime::now();
+        let now = now_system_time();
         let now_millis = now
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
@@ -235,63 +236,63 @@ impl UnifiedAlert {
 
     pub fn acknowledge(&mut self, acknowledged_by: String) {
         self.status = AlertStatus::Acknowledged;
-        self.acknowledged_at = Some(SystemTime::now());
+        self.acknowledged_at = Some(now_system_time());
         self.acknowledged_by = Some(acknowledged_by);
-        self.updated_at = SystemTime::now();
+        self.updated_at = now_system_time();
     }
 
     pub fn resolve(&mut self) {
         self.status = AlertStatus::Resolved;
-        self.resolved_at = Some(SystemTime::now());
-        self.updated_at = SystemTime::now();
+        self.resolved_at = Some(now_system_time());
+        self.updated_at = now_system_time();
     }
 
     pub fn escalate(&mut self) {
         self.status = AlertStatus::Escalated;
-        self.escalated_at = Some(SystemTime::now());
+        self.escalated_at = Some(now_system_time());
         self.escalation_level += 1;
-        self.updated_at = SystemTime::now();
+        self.updated_at = now_system_time();
     }
 
     pub fn suppress(&mut self, duration: Duration) {
         self.status = AlertStatus::Suppressed;
-        self.suppressed_until = Some(SystemTime::now() + duration);
-        self.updated_at = SystemTime::now();
+        self.suppressed_until = Some(now_system_time() + duration);
+        self.updated_at = now_system_time();
     }
 
     pub fn add_tag(&mut self, key: String, value: String) {
         self.tags.insert(key, value);
-        self.updated_at = SystemTime::now();
+        self.updated_at = now_system_time();
     }
 
     pub fn add_annotation(&mut self, key: String, value: String) {
         self.annotations.insert(key, value);
-        self.updated_at = SystemTime::now();
+        self.updated_at = now_system_time();
     }
 
     pub fn add_context(&mut self, key: String, value: serde_json::Value) {
         self.context.insert(key, value);
-        self.updated_at = SystemTime::now();
+        self.updated_at = now_system_time();
     }
 
     pub fn increment_fire_count(&mut self) {
         self.fire_count += 1;
-        self.updated_at = SystemTime::now();
+        self.updated_at = now_system_time();
     }
 
     pub fn increment_notification_count(&mut self) {
         self.notification_count += 1;
         self.last_notification_at = Some(
-            SystemTime::now()
+            now_system_time()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64,
         );
-        self.updated_at = SystemTime::now();
+        self.updated_at = now_system_time();
     }
 
     pub fn duration_seconds(&self) -> u64 {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -309,7 +310,7 @@ impl UnifiedAlert {
 
     pub fn is_suppressed(&self) -> bool {
         if let Some(suppressed_until) = self.suppressed_until {
-            SystemTime::now() < suppressed_until
+            now_system_time() < suppressed_until
         } else {
             self.status == AlertStatus::Suppressed
         }
@@ -513,7 +514,7 @@ impl SuppressionRule {
         if !self.enabled {
             return false;
         }
-        let now = SystemTime::now();
+        let now = now_system_time();
         now >= self.start_time && now <= self.end_time
     }
 
@@ -595,7 +596,7 @@ mod tests {
 
     #[test]
     fn test_suppression_rule() {
-        let start_time = SystemTime::now();
+        let start_time = now_system_time();
         let end_time = start_time + Duration::from_secs(3600); // 1 hour
 
         let suppression = SuppressionRule {

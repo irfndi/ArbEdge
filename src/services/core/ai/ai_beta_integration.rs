@@ -1,4 +1,6 @@
 use crate::types::{ArbitrageOpportunity, CommandPermission};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::utils::now_system_time;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -358,7 +360,7 @@ impl AiBetaIntegrationService {
         #[cfg(target_arch = "wasm32")]
         let _now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let _now = std::time::SystemTime::now()
+        let _now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -417,7 +419,7 @@ impl AiBetaIntegrationService {
         #[cfg(target_arch = "wasm32")]
         let _now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let _now = std::time::SystemTime::now()
+        let _now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -783,7 +785,7 @@ impl AiBetaIntegrationService {
         #[cfg(target_arch = "wasm32")]
         let _now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let _now = std::time::SystemTime::now()
+        let _now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;

@@ -1,6 +1,7 @@
+use crate::utils::now_system_time;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -789,7 +790,7 @@ impl PolicyManagementInterface {
         self.check_tenant_policy_limit(&user_context.tenant_id).await?;
 
         let policy_id = Uuid::new_v4();
-        let now = SystemTime::now();
+        let now = now_system_time();
         
         let mut policy = request.policy;
         policy.id = policy_id;
@@ -868,7 +869,7 @@ impl PolicyManagementInterface {
             policy.config = config;
         }
 
-        policy.updated_at = SystemTime::now();
+        policy.updated_at = now_system_time();
         policy.modified_by = user_context.user_id.clone();
 
         // Increment version if enabled
@@ -1073,7 +1074,7 @@ impl PolicyManagementInterface {
         }
 
         let mut limiter = self.rate_limiter.write().await;
-        let now = SystemTime::now();
+        let now = now_system_time();
         
         let state = limiter.entry(tenant_id.to_string()).or_insert(RateLimitState {
             tokens: self.config.rate_limit.burst_capacity,
@@ -1134,7 +1135,7 @@ impl PolicyManagementInterface {
 
         let audit_entry = PolicyAuditEntry {
             id: Uuid::new_v4(),
-            timestamp: SystemTime::now(),
+            timestamp: now_system_time(),
             policy_id,
             event_type,
             user_id: user_id.to_string(),
@@ -1403,8 +1404,8 @@ mod tests {
                 },
             },
             tenant_id: "test_tenant".to_string(),
-            created_at: SystemTime::now(),
-            updated_at: SystemTime::now(),
+            created_at: now_system_time(),
+            updated_at: now_system_time(),
             created_by: "test_user".to_string(),
             modified_by: "test_user".to_string(),
         };

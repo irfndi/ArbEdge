@@ -1,3 +1,4 @@
+use crate::utils::now_system_time;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -271,7 +272,7 @@ impl CircuitBreaker {
             CircuitBreakerState::Open => {
                 let last_failure = self.last_failure_time.read().await;
                 if let Some(last_fail_time) = *last_failure {
-                    if SystemTime::now().duration_since(last_fail_time).unwrap_or_default() 
+                    if now_system_time().duration_since(last_fail_time).unwrap_or_default() 
                         > self.config.retry_timeout {
                         drop(last_failure);
                         drop(state);
@@ -298,7 +299,7 @@ impl CircuitBreaker {
                 
                 if *failure_count >= self.config.failure_threshold {
                     *self.state.write().await = CircuitBreakerState::Open;
-                    *self.last_failure_time.write().await = Some(SystemTime::now());
+                    *self.last_failure_time.write().await = Some(now_system_time());
                 }
                 
                 Err(error)
@@ -343,7 +344,7 @@ impl CleanupImpactAnalysisEngine {
         request: ImpactAnalysisRequest,
     ) -> Result<ImpactAnalysisResult, Box<dyn std::error::Error + Send + Sync>> {
         let request_id = Uuid::new_v4();
-        let start_time = SystemTime::now();
+        let start_time = now_system_time();
         
         // Check if analysis is already running for this cleanup
         {
@@ -389,7 +390,7 @@ impl CleanupImpactAnalysisEngine {
         // Determine if safe to proceed
         let safe_to_proceed = self.determine_safety(&risk_assessment, &safety_checks, request).await;
         
-        let analysis_time = SystemTime::now().duration_since(start_time)
+        let analysis_time = now_system_time().duration_since(start_time)
             .unwrap_or_default();
 
         let result = ImpactAnalysisResult {
@@ -403,7 +404,7 @@ impl CleanupImpactAnalysisEngine {
             safe_to_proceed,
             required_approvals: self.get_required_approvals(&risk_assessment.overall_risk).await,
             recommended_actions,
-            created_at: SystemTime::now(),
+            created_at: now_system_time(),
         };
 
         // Cache the result
@@ -519,7 +520,7 @@ impl CleanupImpactAnalysisEngine {
             node_type: "table".to_string(), // Would be determined from actual data
             impact_level: ImpactLevel::Medium, // Would be calculated based on usage
             size: 1024 * 1024, // Would be actual size
-            last_accessed: Some(SystemTime::now() - Duration::from_days(7)),
+            last_accessed: Some(now_system_time() - Duration::from_days(7)),
             business_critical: false, // Would be determined from metadata
             metadata: HashMap::new(),
         })
@@ -553,7 +554,7 @@ impl CleanupImpactAnalysisEngine {
                 dependency_type: DependencyType::ForeignKey,
                 impact_level: ImpactLevel::Medium,
                 is_critical: false,
-                last_accessed: Some(SystemTime::now() - Duration::from_days(1)),
+                last_accessed: Some(now_system_time() - Duration::from_days(1)),
                 access_frequency: 10.0,
                 data_size: 1024,
                 business_critical: false,
@@ -638,7 +639,7 @@ impl CleanupImpactAnalysisEngine {
 
             // Check recent activity
             if let Some(last_accessed) = node.last_accessed {
-                let days_since_access = SystemTime::now()
+                let days_since_access = now_system_time()
                     .duration_since(last_accessed)
                     .unwrap_or_default()
                     .as_secs() / 86400;
@@ -672,7 +673,7 @@ impl CleanupImpactAnalysisEngine {
                     dependency_type: edge.dependency_type.clone(),
                     impact_level: ImpactLevel::High,
                     is_critical: true,
-                    last_accessed: Some(SystemTime::now()),
+                    last_accessed: Some(now_system_time()),
                     access_frequency: 100.0, // High strength suggests high usage
                     data_size: 0,
                     business_critical: true,
@@ -845,7 +846,7 @@ impl CleanupImpactAnalysisEngine {
     }
 
     async fn check_recent_activity(&self, dependency_graph: &DependencyGraph) -> SafetyCheck {
-        let recent_threshold = SystemTime::now() - Duration::from_days(7);
+        let recent_threshold = now_system_time() - Duration::from_days(7);
         let recent_count = dependency_graph.nodes.values()
             .filter(|node| {
                 node.last_accessed
@@ -1066,7 +1067,7 @@ impl CleanupImpactAnalysisEngine {
     /// Clear old analysis results from cache
     pub async fn cleanup_cache(&self, max_age: Duration) {
         let mut cache = self.analysis_cache.write().await;
-        let cutoff_time = SystemTime::now() - max_age;
+        let cutoff_time = now_system_time() - max_age;
         
         cache.retain(|_, result| {
             result.created_at > cutoff_time
@@ -1225,7 +1226,7 @@ mod tests {
             node_type: "table".to_string(),
             impact_level: ImpactLevel::High,
             size: 1024 * 1024,
-            last_accessed: Some(SystemTime::now() - Duration::from_days(1)),
+            last_accessed: Some(now_system_time() - Duration::from_days(1)),
             business_critical: true,
             metadata: HashMap::new(),
         });

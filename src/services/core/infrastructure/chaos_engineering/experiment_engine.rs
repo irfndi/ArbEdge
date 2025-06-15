@@ -3,9 +3,10 @@
 //! Core experiment orchestration and state management for chaos engineering
 
 use crate::utils::error::{ArbitrageError, ArbitrageResult, ErrorKind};
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use worker::Env;
 
 use super::ChaosEngineeringConfig;
@@ -289,7 +290,7 @@ impl ChaosExperiment {
         description: String,
         experiment_type: ExperimentType,
     ) -> Self {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
@@ -317,7 +318,7 @@ impl ChaosExperiment {
     /// Update experiment state and timestamp
     pub fn update_state(&mut self, state: ExperimentState) {
         self.state = state;
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
@@ -335,7 +336,7 @@ impl ChaosExperiment {
     /// Check if experiment has timed out
     pub fn is_timed_out(&self, timeout_seconds: u64) -> bool {
         if let Some(started_at) = self.timestamps.started_at {
-            let now = SystemTime::now()
+            let now = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();

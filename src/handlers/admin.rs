@@ -3,6 +3,7 @@ use crate::responses::ApiResponse;
 use crate::services;
 use crate::services::core::admin::SimpleAdminService;
 use crate::types::UserAccessLevel;
+use crate::utils::now_system_time;
 use std::sync::Arc;
 use worker::{console_log, Env, Request, Response, Result};
 
@@ -75,7 +76,7 @@ pub async fn handle_api_admin_get_users(req: Request, env: Env) -> Result<Respon
                             "registrations_this_week": stats.registrations_this_week,
                             "registrations_this_month": stats.registrations_this_month
                         },
-                        "timestamp": std::time::SystemTime::now()
+                        "timestamp": now_system_time()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()
@@ -305,7 +306,7 @@ pub async fn handle_api_admin_update_config(_req: Request, _env: Env) -> Result<
                     let response = ApiResponse::success(serde_json::json!({
                         "updated": true,
                         "config": updated_config,
-                        "timestamp": std::time::SystemTime::now()
+                        "timestamp": now_system_time()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()

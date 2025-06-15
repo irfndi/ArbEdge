@@ -3,8 +3,9 @@
 //! Provides predictive cache warming and preloading strategies
 
 use super::metadata::{AccessPattern, DataType};
+use crate::utils::now_system_time;
 use std::collections::{HashMap, VecDeque};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 /// Cache warming service for predictive preloading
 pub struct CacheWarmingService {
@@ -52,7 +53,7 @@ impl CacheWarmingService {
                 priority: prediction.priority,
                 predicted_access_time: prediction.predicted_access_time,
                 confidence: prediction.confidence,
-                created_at: SystemTime::now()
+                created_at: now_system_time()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs(),
@@ -81,7 +82,7 @@ impl CacheWarmingService {
 
     /// Get next warming requests (up to batch size)
     pub fn get_next_warming_batch(&mut self) -> Vec<WarmingRequest> {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -133,7 +134,7 @@ impl CacheWarmingService {
 
     /// Record successful warming operation
     pub fn record_warming_success(&mut self, key: &str) {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -172,7 +173,7 @@ impl CacheWarmingService {
 
     /// Clear old warming operations from stats
     pub fn cleanup_old_stats(&mut self, max_age_seconds: u64) {
-        let cutoff = SystemTime::now()
+        let cutoff = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
@@ -219,7 +220,7 @@ impl PatternAnalyzer {
     }
 
     fn record_access(&mut self, key: &str, data_type: &DataType, access_pattern: &AccessPattern) {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();

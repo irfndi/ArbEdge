@@ -18,7 +18,7 @@ use crate::types::{
     CommandPermission, ExchangeCredentials, ExchangeIdEnum, FundingRateInfo, Market, MarketLimits,
     MarketPrecision, MinMax, Order, OrderBook, Position, Ticker, TradingFees,
 };
-use crate::utils::{ArbitrageError, ArbitrageResult};
+use crate::utils::{now_system_time, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use worker::console_log;
 
@@ -1460,7 +1460,7 @@ impl ExchangeService {
         params: Option<Value>,
         auth: Option<&ExchangeCredentials>,
     ) -> ArbitrageResult<Value> {
-        let start_time = std::time::SystemTime::now();
+        let start_time = now_system_time();
         let base_url = "https://api.binance.com";
         let url = format!("{}{}", base_url, endpoint);
 
@@ -1772,7 +1772,7 @@ impl ExchangeService {
         params: Option<Value>,
         auth: Option<&ExchangeCredentials>,
     ) -> ArbitrageResult<Value> {
-        let start_time = std::time::SystemTime::now();
+        let start_time = now_system_time();
         let base_url = "https://api.bybit.com";
         let url = format!("{}{}", base_url, endpoint);
 
@@ -1936,7 +1936,7 @@ impl ExchangeService {
         params: Option<Value>,
         auth: Option<&ExchangeCredentials>,
     ) -> ArbitrageResult<Value> {
-        let start_time = std::time::SystemTime::now();
+        let start_time = now_system_time();
         let base_url = "https://www.okx.com";
         let url = format!("{}{}", base_url, endpoint);
 

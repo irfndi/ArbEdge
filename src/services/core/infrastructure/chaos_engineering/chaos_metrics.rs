@@ -1,10 +1,11 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
+use crate::utils::now_system_time;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use worker::Env;
 
 use crate::services::core::infrastructure::chaos_engineering::{
@@ -921,7 +922,7 @@ impl AlertManager {
     ) -> ArbitrageResult<()> {
         let alert_id = format!(
             "alert_{}",
-            SystemTime::now()
+            now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()

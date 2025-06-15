@@ -3,10 +3,11 @@
 //! Provides key-value storage operations for the ArbEdge platform.
 //! Supports Cloudflare KV and other KV store implementations.
 
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 /// KV service implementation using cache-based storage with interior mutability
 #[derive(Debug, Clone)]
@@ -101,7 +102,7 @@ impl KVService {
         // Check cache first
         let cache = self.cache.lock().unwrap();
         if let Some(cached) = cache.get(key) {
-            let now = SystemTime::now()
+            let now = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
@@ -122,7 +123,7 @@ impl KVService {
         self.validate_value(value)?;
 
         let ttl = ttl.unwrap_or(self.default_ttl);
-        let expires_at = SystemTime::now()
+        let expires_at = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
@@ -198,7 +199,7 @@ impl KVService {
         // Check cache first
         let cache = self.cache.lock().unwrap();
         if let Some(cached) = cache.get(key) {
-            let now = SystemTime::now()
+            let now = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
@@ -218,7 +219,7 @@ impl KVService {
 
         let cache = self.cache.lock().unwrap();
         if let Some(cached) = cache.get(key) {
-            let now = SystemTime::now()
+            let now = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
@@ -235,7 +236,7 @@ impl KVService {
 
     /// Clear expired entries from cache
     pub fn cleanup_cache(&self) {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -246,7 +247,7 @@ impl KVService {
 
     /// Get cache statistics
     pub fn get_cache_stats(&self) -> CacheStats {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();

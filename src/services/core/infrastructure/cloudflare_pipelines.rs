@@ -4,6 +4,7 @@
 //! Integrates with Cloudflare Workers and other pipeline services.
 
 use crate::services::core::infrastructure::UnifiedRetryConfig;
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -277,7 +278,7 @@ impl CloudflarePipelinesService {
             id: execution_id.clone(),
             pipeline_id: pipeline_id.to_string(),
             status: ExecutionStatus::Pending,
-            started_at: SystemTime::now(),
+            started_at: now_system_time(),
             completed_at: None,
             steps: HashMap::new(),
             context: context.unwrap_or_else(|| ExecutionContext {
@@ -325,7 +326,7 @@ impl CloudflarePipelinesService {
                 || execution.status == ExecutionStatus::Pending
             {
                 execution.status = ExecutionStatus::Cancelled;
-                execution.completed_at = Some(SystemTime::now());
+                execution.completed_at = Some(now_system_time());
             }
             Ok(())
         } else {
@@ -348,7 +349,7 @@ impl CloudflarePipelinesService {
                 .duration_since(execution.started_at)
                 .unwrap_or_default()
         } else {
-            SystemTime::now()
+            now_system_time()
                 .duration_since(execution.started_at)
                 .unwrap_or_default()
         };
@@ -387,7 +388,7 @@ impl CloudflarePipelinesService {
             // TODO: Implement actual step execution logic
             // For now, mark as completed
             execution.status = ExecutionStatus::Completed;
-            execution.completed_at = Some(SystemTime::now());
+            execution.completed_at = Some(now_system_time());
         }
         Ok(())
     }
@@ -504,8 +505,8 @@ pub async fn create_data_ingestion_pipeline(
             environment: HashMap::new(),
             resources: ResourceConfig::default(),
         },
-        created_at: SystemTime::now(),
-        updated_at: SystemTime::now(),
+        created_at: now_system_time(),
+        updated_at: now_system_time(),
         enabled: true,
     };
 
@@ -583,8 +584,8 @@ pub async fn create_market_analysis_pipeline(
             environment: HashMap::new(),
             resources: ResourceConfig::default(),
         },
-        created_at: SystemTime::now(),
-        updated_at: SystemTime::now(),
+        created_at: now_system_time(),
+        updated_at: now_system_time(),
         enabled: true,
     };
 

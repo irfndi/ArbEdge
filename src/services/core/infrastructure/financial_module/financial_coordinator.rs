@@ -28,7 +28,7 @@ fn get_current_time_millis() -> u64 {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::time::SystemTime::now()
+        crate::utils::now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64

@@ -674,6 +674,7 @@ mod tests {
         UserTradingPreferences,
     };
     use crate::utils::logger::{LogLevel, Logger};
+    use crate::utils::now_system_time;
 
     // Helper functions for testing
 
@@ -736,7 +737,7 @@ mod tests {
     fn create_test_trading_preferences() -> UserTradingPreferences {
         // Helper to get current timestamp as u64
         let now_timestamp = || {
-            std::time::SystemTime::now()
+            now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs()

@@ -1,6 +1,7 @@
 use crate::middleware::extract_user_id_from_headers;
 use crate::responses::ApiResponse;
 use crate::services;
+use crate::utils::now_system_time;
 use std::sync::Arc;
 use worker::{Env, Request, Response, Result};
 
@@ -54,7 +55,7 @@ pub async fn handle_api_get_trading_balance(req: Request, env: Env) -> Result<Re
                     "min_profit_threshold": profile.configuration.trading_settings.min_profit_threshold
                 },
                 "api_keys_configured": profile.api_keys.iter().any(|key| !key.is_read_only && key.is_active),
-                "timestamp": std::time::SystemTime::now()
+                "timestamp": now_system_time()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs()

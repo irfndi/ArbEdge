@@ -1,11 +1,12 @@
 use crate::services::core::infrastructure::persistence_layer::connection_pool::ConnectionManager;
 use crate::services::core::infrastructure::persistence_layer::transaction_coordinator::TransactionCoordinator;
+use crate::utils::now_system_time;
 use crate::utils::ArbitrageResult;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 use worker::Env;
 
 /// OpenTelemetry-compliant metric types following semantic conventions
@@ -364,11 +365,11 @@ impl Default for MetricsCollectionHealth {
             memory_usage_mb: 0.0,
             active_metric_series: 0,
             dropped_metrics_count: 0,
-            last_collection_timestamp: SystemTime::now()
+            last_collection_timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,
-            last_export_timestamp: SystemTime::now()
+            last_export_timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,
@@ -425,7 +426,7 @@ impl MetricsCollectionEngine {
         transaction_coordinator: Arc<TransactionCoordinator>,
         _env: &Env,
     ) -> ArbitrageResult<Self> {
-        let startup_time = SystemTime::now()
+        let startup_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
@@ -758,7 +759,7 @@ impl MetricsCollectionEngine {
         let health = self.health.read();
 
         // Check if collection is working
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;

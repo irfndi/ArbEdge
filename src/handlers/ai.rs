@@ -1,6 +1,7 @@
 use crate::middleware::extract_user_id_from_headers;
 use crate::responses::ApiResponse;
 use crate::services;
+use crate::utils::now_system_time;
 use std::sync::Arc;
 use worker::{Env, Request, Response, Result};
 
@@ -59,7 +60,7 @@ pub async fn handle_api_ai_analyze(req: Request, env: Env) -> Result<Response> {
                     let analysis_data = serde_json::json!({
                         "user_id": user_id,
                         "analysis": analysis,
-                        "timestamp": std::time::SystemTime::now()
+                        "timestamp": now_system_time()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()

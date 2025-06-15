@@ -1,6 +1,7 @@
 // Enterprise-grade Cost Tracking and Analysis Engine
 // Implements FinOps best practices for real-time cost analytics, forecasting, and optimization
 
+use crate::utils::now_system_time;
 use anyhow::Result;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -719,7 +720,7 @@ impl CostTrackingAnalysisEngine {
             recommendation_engine: Arc::new(RwLock::new(RecommendationEngine::new())),
             allocation_engine: Arc::new(RwLock::new(AllocationEngine::new())),
             analytics_performance: Arc::new(RwLock::new(AnalyticsPerformance::default())),
-            startup_time: SystemTime::now(),
+            startup_time: now_system_time(),
         });
 
         Ok(engine)
@@ -809,7 +810,7 @@ impl CostTrackingAnalysisEngine {
             metric_type,
             value: unit_cost,
             unit: "USD".to_string(),
-            timestamp: SystemTime::now(),
+            timestamp: now_system_time(),
             tags: scope,
             calculation_method: "aggregate_calculation".to_string(),
         })
@@ -1018,7 +1019,7 @@ impl CostTrackingAnalysisEngine {
             optimization_opportunities,
             estimated_monthly_savings,
             cost_efficiency_score: self.calculate_efficiency_score().await?,
-            generated_at: SystemTime::now(),
+            generated_at: now_system_time(),
         })
     }
 
@@ -1175,7 +1176,7 @@ impl ForecastEngine {
             models: HashMap::new(),
             historical_data: VecDeque::new(),
             model_accuracy: HashMap::new(),
-            last_training: SystemTime::now(),
+            last_training: now_system_time(),
         }
     }
 
@@ -1187,7 +1188,7 @@ impl ForecastEngine {
         // ML-based forecast implementation would go here
         Ok(CostForecast {
             id: Uuid::new_v4(),
-            forecast_date: SystemTime::now(),
+            forecast_date: now_system_time(),
             forecast_period,
             scope,
             predicted_cost: 1000.0, // Placeholder

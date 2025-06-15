@@ -20,4 +20,7 @@ pub use core_architecture::{
 };
 pub use error::{ArbitrageError, ArbitrageResult};
 pub use helpers::{generate_api_key, generate_secret_key, generate_uuid, validate_api_key};
-pub use time::{get_current_timestamp, TimeService}; // Added re-export for TimeService and get_current_timestamp
+pub use time::{
+    get_current_timestamp, now_millis, now_secs, now_system_time, system_time_to_millis,
+    system_time_to_secs, TimeService,
+}; // WASM-compatible time functions

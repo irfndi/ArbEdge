@@ -6,6 +6,8 @@ use crate::services::core::infrastructure::data_ingestion_module::DataIngestionM
 use crate::services::core::infrastructure::database_repositories::DatabaseManager;
 use crate::services::core::user::user_trading_preferences::UserTradingPreferencesService;
 use crate::services::core::user::user_trading_preferences::{TradingFocus, UserTradingPreferences};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::utils::now_system_time;
 use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -39,7 +41,7 @@ impl PriceSeries {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -68,7 +70,7 @@ impl PriceSeries {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.last_updated = std::time::SystemTime::now()
+            self.last_updated = now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
@@ -589,7 +591,7 @@ impl MarketAnalysisService {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -657,7 +659,7 @@ impl MarketAnalysisService {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -1041,7 +1043,7 @@ impl MarketAnalysisService {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;

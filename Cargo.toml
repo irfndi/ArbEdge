@@ -97,6 +97,14 @@ path = "tests/integration/service_communication_test.rs"
 name = "persistence_layer_integration_test"
 path = "tests/integration/persistence_layer_integration_test.rs"
 
+[[test]]
+name = "data_integrity_test"
+path = "tests/integration/data_integrity_test.rs"
+
+
+[[test]]
+name = "monitoring_reliability_integration_test"
+path = "tests/integration/monitoring_reliability_integration_test.rs"
 
 
  

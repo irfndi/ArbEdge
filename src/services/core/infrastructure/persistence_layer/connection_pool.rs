@@ -3,6 +3,7 @@
 //! Provides connection pooling, health monitoring, failover strategies, and circuit breaker patterns
 //! for both D1 database connections and R2 storage access with comprehensive resource management
 
+use crate::utils::now_system_time;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -91,7 +92,7 @@ impl CircuitBreaker {
 
     pub fn record_failure(&mut self) {
         self.failure_count += 1;
-        self.last_failure_time = Some(SystemTime::now());
+        self.last_failure_time = Some(now_system_time());
         self.success_count = 0;
 
         if self.failure_count >= self.failure_threshold {
@@ -104,7 +105,7 @@ impl CircuitBreaker {
             CircuitBreakerState::Closed => true,
             CircuitBreakerState::Open => {
                 if let Some(last_failure) = self.last_failure_time {
-                    if SystemTime::now()
+                    if now_system_time()
                         .duration_since(last_failure)
                         .unwrap_or(Duration::ZERO)
                         > self.timeout
@@ -526,7 +527,7 @@ impl ConnectionPool {
 
     /// Generate unique connection ID
     fn generate_connection_id(&self, conn_type: &ConnectionType) -> String {
-        let timestamp = SystemTime::now()
+        let timestamp = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis();
@@ -571,7 +572,7 @@ impl ConnectionPool {
         // Update health check time
         {
             let mut stats = self.stats.lock().unwrap();
-            stats.last_health_check = SystemTime::now()
+            stats.last_health_check = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64;
@@ -643,7 +644,7 @@ impl ConnectionPool {
             connection_requests: stats.connection_requests,
             connection_failures: stats.connection_failures,
             active_connection_count: connection_info.len() as u32,
-            collected_at: SystemTime::now()
+            collected_at: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,

@@ -2,7 +2,8 @@ use crate::middleware::extract_user_id_from_headers;
 use crate::responses::ApiResponse;
 use crate::services;
 use crate::types;
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::utils::now_system_time;
+use std::time::UNIX_EPOCH;
 use worker::{Env, Request, Response, Result};
 
 /// Helper function to initialize user profile service
@@ -131,7 +132,7 @@ pub async fn handle_api_update_user_profile(mut req: Request, env: Env) -> Resul
                                     "configuration": profile.configuration,
                                     "updated_at": profile.updated_at
                                 },
-                                "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+                                "timestamp": now_system_time().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
                             }));
                             Response::from_json(&response)
                         }
@@ -186,7 +187,7 @@ pub async fn handle_api_get_user_preferences(req: Request, env: Env) -> Result<R
                 "max_entry_size_usdt": profile.configuration.max_entry_size_usdt,
                 "preferred_exchanges": profile.configuration.preferred_exchanges,
                 "notification_preferences": profile.configuration.notification_settings,
-                "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+                "timestamp": now_system_time().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
             });
 
             let response = ApiResponse::success(preferences);
@@ -252,7 +253,7 @@ pub async fn handle_api_update_user_preferences(mut req: Request, env: Env) -> R
                                     "preferred_exchanges": profile.configuration.preferred_exchanges,
                                     "notification_preferences": profile.configuration.notification_settings
                                 },
-                                "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+                                "timestamp": now_system_time().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
                             }));
                             Response::from_json(&response)
                         }

@@ -567,7 +567,7 @@ impl ChaosIntegrationTestSuite {
         );
 
         // Test the recovery mechanism by triggering a failure and measuring recovery time
-        let recovery_start = SystemTime::now();
+        let recovery_start = now_system_time();
 
         // Simulate a failure scenario and trigger recovery
         let recovery_result = self
@@ -661,7 +661,7 @@ impl ChaosIntegrationTestSuite {
         }
 
         // Execute concurrent experiments
-        let concurrent_start = SystemTime::now();
+        let concurrent_start = now_system_time();
         let mut concurrent_results = Vec::new();
 
         for campaign in &concurrent_campaigns {

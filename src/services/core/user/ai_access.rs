@@ -5,6 +5,7 @@ use crate::types::{
     AIAccessLevel, AITemplate, AITemplateParameters, AITemplateType, AIUsageTracker,
     ApiKeyProvider, TemplateAccess, UserAccessLevel, UserProfile, ValidationLevel,
 };
+use crate::utils::now_system_time;
 use log;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -507,11 +508,11 @@ impl AIAccessService {
                 },
                 created_by: None,
                 is_system_default: true,
-                created_at: std::time::SystemTime::now()
+                created_at: now_system_time()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs(),
-                updated_at: std::time::SystemTime::now()
+                updated_at: now_system_time()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs(),

@@ -1,5 +1,6 @@
+use crate::utils::now_system_time;
 use serde::Serialize;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 #[derive(Serialize)]
 pub struct ApiResponse<T> {
@@ -15,7 +16,7 @@ impl<T> ApiResponse<T> {
             success: true,
             data: Some(data),
             error: None,
-            timestamp: SystemTime::now()
+            timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_else(|_| {
                     // Fallback to zero if system time is before Unix epoch
@@ -30,7 +31,7 @@ impl<T> ApiResponse<T> {
             success: false,
             data: None,
             error: Some(message),
-            timestamp: SystemTime::now()
+            timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_else(|_| {
                     // Fallback to zero if system time is before Unix epoch

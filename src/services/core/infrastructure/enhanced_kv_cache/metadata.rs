@@ -3,9 +3,10 @@
 //! Provides comprehensive metadata tracking for cache analytics, cleanup optimization,
 //! and performance monitoring
 
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 /// Cache entry metadata for analytics and optimization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,7 +208,7 @@ pub struct AccessPattern {
 impl AccessPattern {
     /// Record a new access
     pub fn record_access(&mut self) {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -234,7 +235,7 @@ impl AccessPattern {
 
     /// Get time since last access
     pub fn last_access_age(&self) -> Duration {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -262,7 +263,7 @@ impl Default for AccessPattern {
     fn default() -> Self {
         Self {
             access_count: 0,
-            last_access: SystemTime::now()
+            last_access: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
@@ -378,7 +379,7 @@ impl CleanupInfo {
 
     /// Update cleanup score based on access patterns and space pressure
     pub fn update_cleanup_score(&mut self, access_pattern: &AccessPattern, space_pressure: f64) {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -418,7 +419,7 @@ impl Default for CleanupInfo {
     fn default() -> Self {
         Self {
             cleanup_score: 0.0,
-            last_cleanup_check: SystemTime::now()
+            last_cleanup_check: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
@@ -571,7 +572,7 @@ impl MetadataTracker {
 
     /// Generate comprehensive analytics report
     pub fn generate_analytics_report(&self) -> CacheAnalyticsReport {
-        let generated_at = SystemTime::now()
+        let generated_at = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -984,7 +985,7 @@ impl MetadataTracker {
     }
 
     fn hours_since_last_access(&self, metadata: &CacheMetadata) -> u64 {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -1160,7 +1161,7 @@ impl MetadataTracker {
 
     fn calculate_access_trends(&self) -> Vec<TrendDataPoint> {
         let mut trends = Vec::new();
-        let current_timestamp = std::time::SystemTime::now()
+        let current_timestamp = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();

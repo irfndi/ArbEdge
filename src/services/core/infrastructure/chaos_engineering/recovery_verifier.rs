@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use worker::Env;
 
@@ -557,7 +558,7 @@ impl RecoveryVerifier {
 
     /// Get current timestamp in seconds
     fn current_timestamp_seconds() -> u64 {
-        std::time::SystemTime::now()
+        now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()

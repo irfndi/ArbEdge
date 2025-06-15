@@ -1,5 +1,6 @@
+use crate::utils::now_system_time;
 use std::collections::HashMap;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -395,7 +396,7 @@ impl ExperimentOrchestrator {
 
     /// Get the next campaign ready to start
     fn get_next_ready_campaign(&mut self) -> Option<ExperimentCampaign> {
-        let current_time = SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -454,7 +455,7 @@ impl ExperimentOrchestrator {
         mut campaign: ExperimentCampaign,
         env: &Env,
     ) -> ArbitrageResult<()> {
-        let current_time = SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -625,7 +626,7 @@ impl ExperimentOrchestrator {
         ExperimentCampaign {
             id: format!(
                 "temp_{}",
-                SystemTime::now()
+                now_system_time()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()
@@ -643,7 +644,7 @@ impl ExperimentOrchestrator {
             actual_end_time: None,
             metrics: None,
             created_by: "system".to_string(),
-            created_at: SystemTime::now()
+            created_at: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
@@ -658,7 +659,7 @@ impl ExperimentOrchestrator {
     async fn monitor_active_campaigns(&mut self, env: &Env) -> ArbitrageResult<()> {
         let mut campaigns_to_complete = Vec::new();
         let mut campaigns_to_halt = Vec::new();
-        let current_time = SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -749,7 +750,7 @@ impl ExperimentOrchestrator {
         if let Some(mut campaign) = self.active_campaigns.remove(campaign_id) {
             campaign.status = CampaignStatus::Aborted;
 
-            let current_time = SystemTime::now()
+            let current_time = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
@@ -783,7 +784,7 @@ impl ExperimentOrchestrator {
     /// Complete a campaign
     async fn complete_campaign(&mut self, campaign_id: &str, env: &Env) -> ArbitrageResult<()> {
         if let Some(mut campaign) = self.active_campaigns.remove(campaign_id) {
-            let current_time = SystemTime::now()
+            let current_time = now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
@@ -856,7 +857,7 @@ impl ExperimentOrchestrator {
 
     /// Update orchestration statistics
     async fn update_statistics(&mut self) {
-        let current_time = SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -980,7 +981,7 @@ impl SafetyController {
         let violation = SafetyViolation {
             violation_type,
             severity,
-            timestamp: SystemTime::now()
+            timestamp: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
@@ -1005,7 +1006,7 @@ impl ExperimentScheduler {
     }
 
     async fn schedule_campaign(&mut self, campaign: &ExperimentCampaign) -> ArbitrageResult<u64> {
-        let current_time = SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -1132,7 +1133,7 @@ impl MetricsCollector {
         campaign_id: &str,
     ) -> ArbitrageResult<ExperimentMetrics> {
         // Simulate metrics collection
-        let current_time = SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -1235,7 +1236,7 @@ impl Default for OrchestrationStats {
             total_experiment_hours: 0.0,
             vulnerabilities_discovered: 0,
             uptime_percentage: 100.0,
-            last_updated: SystemTime::now()
+            last_updated: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
@@ -1247,7 +1248,6 @@ impl Default for OrchestrationStats {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn create_test_config() -> ChaosEngineeringConfig {
         ChaosEngineeringConfig {
@@ -1292,7 +1292,7 @@ mod tests {
             actual_end_time: None,
             metrics: None,
             created_by: "test_user".to_string(),
-            created_at: SystemTime::now()
+            created_at: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
@@ -1535,7 +1535,7 @@ mod tests {
 
     #[test]
     fn test_experiment_metrics_structure() {
-        let current_time = SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();

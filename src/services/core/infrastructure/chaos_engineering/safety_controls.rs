@@ -1,6 +1,7 @@
 //! Safety Controls Module for Chaos Engineering
 
 use crate::utils::error::{ArbitrageError, ArbitrageResult};
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use worker::Env;
@@ -152,7 +153,7 @@ impl SafetyController {
         metrics: &HashMap<String, f64>,
     ) -> ArbitrageResult<Vec<SafetyViolation>> {
         let mut violations = Vec::new();
-        let current_time = std::time::SystemTime::now()
+        let current_time = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();

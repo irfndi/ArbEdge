@@ -1,5 +1,6 @@
 // src/types.rs
 
+use crate::utils::now_system_time;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -45,7 +46,7 @@ pub enum AccountStatus {
     Verified,
     Unverified,
 }
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 // UUID is used throughout the file as uuid::Uuid::new_v4()
 // Keeping the full path for clarity
 
@@ -1869,7 +1870,7 @@ pub struct ArbitrageOpportunity {
 
 impl Default for ArbitrageOpportunity {
     fn default() -> Self {
-        let timestamp = SystemTime::now()
+        let timestamp = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
@@ -1917,7 +1918,7 @@ impl ArbitrageOpportunity {
         volume: f64,
         confidence: f64,
     ) -> Self {
-        let timestamp = SystemTime::now()
+        let timestamp = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;

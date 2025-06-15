@@ -23,7 +23,7 @@ use crate::types::{
     ArbitrageOpportunity, ArbitrageType, ChatContext, ExchangeIdEnum, GlobalOpportunity,
     GroupedOpportunity, OpportunitySource, TechnicalOpportunity,
 };
-use crate::utils::{ArbitrageError, ArbitrageResult};
+use crate::utils::{now_system_time, ArbitrageError, ArbitrageResult};
 use chrono::Utc;
 use serde_json;
 use std::sync::Arc;
@@ -472,7 +472,7 @@ impl OpportunityEngine {
 
         // Generate unique request ID for tracking
         let request_id = format!("global_opp_{}", chrono::Utc::now().timestamp_millis());
-        let pipeline_start_time = std::time::SystemTime::now();
+        let pipeline_start_time = now_system_time();
 
         if enhanced_logging {
             worker::console_log!(
@@ -539,7 +539,7 @@ impl OpportunityEngine {
         all_opportunities.extend(funding_arbitrage_opportunities);
 
         // Track market data fetch stage
-        let _market_data_start = std::time::SystemTime::now();
+        let _market_data_start = now_system_time();
         if let Some(monitor) = &self.opportunity_monitor {
             let _ = monitor
                 .track_pipeline_stage(
@@ -572,7 +572,7 @@ impl OpportunityEngine {
                 for exchange_b in monitored_exchanges.iter() {
                     if exchange_a != exchange_b {
                         // Track API calls for monitoring
-                        let api_call_start = std::time::SystemTime::now();
+                        let api_call_start = now_system_time();
 
                         // Get ticker data for both exchanges
                         if let (Ok((ticker_a, source_a)), Ok((ticker_b, source_b))) = (
@@ -726,7 +726,7 @@ impl OpportunityEngine {
             .await;
 
         // Track deduplication stage
-        let dedup_start = std::time::SystemTime::now();
+        let dedup_start = now_system_time();
         let opportunities_before_dedup = all_opportunities.len();
 
         if let Some(monitor) = &self.opportunity_monitor {

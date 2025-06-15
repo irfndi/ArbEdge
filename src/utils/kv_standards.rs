@@ -6,8 +6,9 @@
 //! - Performance monitoring and metrics
 //! - Cache-aside pattern implementations
 
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use worker::kv::KvStore;
 
 /// Configuration for TTL values
@@ -146,7 +147,7 @@ impl KvKeyBuilder {
 
     /// Add timestamp component for uniqueness in metrics and time-series data
     pub fn add_timestamp_component(mut self) -> Self {
-        let timestamp = std::time::SystemTime::now()
+        let timestamp = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -186,7 +187,7 @@ impl CacheMetadata {
         service_name: String,
         config: &TtlConfig,
     ) -> Self {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -202,7 +203,7 @@ impl CacheMetadata {
     }
 
     pub fn is_expired(&self) -> bool {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -211,7 +212,7 @@ impl CacheMetadata {
 
     pub fn record_access(&mut self) {
         self.access_count += 1;
-        self.last_accessed = SystemTime::now()
+        self.last_accessed = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -406,7 +407,7 @@ impl StandardKvOperations {
             .build();
 
         let metric_data = serde_json::json!({
-            "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            "timestamp": now_system_time().duration_since(UNIX_EPOCH).unwrap().as_secs(),
             "operation": operation,
             "key": key,
             "size": size,

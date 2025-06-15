@@ -1,6 +1,7 @@
 use crate::middleware::extract_user_id_from_headers;
 use crate::responses::ApiResponse;
 use crate::services;
+use crate::utils::now_system_time;
 use std::sync::Arc;
 use worker::{Env, Request, Response, Result};
 
@@ -56,7 +57,7 @@ pub async fn handle_api_get_dashboard_analytics(req: Request, env: Env) -> Resul
                             "tier": profile.subscription.tier,
                             "expires_at": profile.subscription.expires_at
                         },
-                        "timestamp": std::time::SystemTime::now()
+                        "timestamp": now_system_time()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()

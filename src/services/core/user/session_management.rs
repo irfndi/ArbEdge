@@ -3,12 +3,12 @@ use crate::types::{
     ArbitrageOpportunity, ChatContext, EnhancedSessionState, EnhancedUserSession, SessionAnalytics,
     SessionConfig, SessionOutcome,
 };
-use crate::utils::{ArbitrageError, ArbitrageResult};
+use crate::utils::{now_system_time, ArbitrageError, ArbitrageResult};
 
 use serde_json::{self};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use worker::console_log;
 use worker::wasm_bindgen::JsValue;
 
@@ -30,7 +30,7 @@ impl SessionCache {
     }
 
     fn get(&self, telegram_id: i64) -> Option<EnhancedUserSession> {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -46,7 +46,7 @@ impl SessionCache {
     }
 
     fn set(&self, telegram_id: i64, session: EnhancedUserSession) {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -63,7 +63,7 @@ impl SessionCache {
     }
 
     fn cleanup_expired(&self) {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
@@ -657,7 +657,7 @@ impl SessionManagementService {
 
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self) -> ArbitrageResult<u32> {
-        let now = SystemTime::now()
+        let now = now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;

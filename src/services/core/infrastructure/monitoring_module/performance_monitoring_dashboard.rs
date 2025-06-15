@@ -1,3 +1,4 @@
+use crate::utils::now_system_time;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -795,8 +796,8 @@ impl PerformanceMonitoringDashboard {
             id: dashboard_id,
             name: "System Overview".to_string(),
             description: "High-level system performance and health metrics".to_string(),
-            created_at: SystemTime::now(),
-            updated_at: SystemTime::now(),
+            created_at: now_system_time(),
+            updated_at: now_system_time(),
             created_by: "system".to_string(),
             tags: vec![
                 "overview".to_string(),
@@ -916,8 +917,8 @@ impl PerformanceMonitoringDashboard {
             id: dashboard_id,
             name: "SLO Dashboard".to_string(),
             description: "Service level objective monitoring and error budget tracking".to_string(),
-            created_at: SystemTime::now(),
-            updated_at: SystemTime::now(),
+            created_at: now_system_time(),
+            updated_at: now_system_time(),
             created_by: "system".to_string(),
             tags: vec![
                 "slo".to_string(),
@@ -1273,7 +1274,7 @@ impl PerformanceMonitoringDashboard {
 
     /// Get time range bounds from TimeRange enum
     fn get_time_range_bounds(&self, time_range: &TimeRange) -> (SystemTime, SystemTime) {
-        let now = SystemTime::now();
+        let now = now_system_time();
 
         match time_range {
             TimeRange::LastMinute => (now - Duration::from_secs(60), now),
@@ -1428,7 +1429,7 @@ impl PerformanceMonitoringDashboard {
             id: Uuid::new_v4(),
             report_type,
             time_range,
-            generated_at: SystemTime::now(),
+            generated_at: now_system_time(),
             executive_summary: "System performance is within acceptable ranges".to_string(),
             slo_summary: slo_trackers.values().cloned().collect(),
             performance_insights: analytics.performance_insights.clone(),
@@ -1447,7 +1448,7 @@ impl PerformanceMonitoringDashboard {
         health.average_query_time = 45.2;
         health.cache_hit_rate = 0.95;
         health.error_rate = 0.001;
-        health.last_health_check = Some(SystemTime::now());
+        health.last_health_check = Some(now_system_time());
 
         Ok(true)
     }

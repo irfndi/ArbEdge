@@ -11,7 +11,7 @@ use crate::services::{
     },
     UserTradingPreferencesService,
 };
-use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
+use crate::utils::{logger::Logger, now_system_time, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -266,11 +266,11 @@ impl UserOpportunityPreferences {
             alert_configs: vec![],
             global_alert_settings: GlobalAlertSettings::default(),
             personalization_settings: PersonalizationSettings::default(),
-            created_at: std::time::SystemTime::now()
+            created_at: now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64,
-            updated_at: std::time::SystemTime::now()
+            updated_at: now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64,
@@ -396,7 +396,7 @@ impl OpportunityCategorizationService {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -469,7 +469,7 @@ impl OpportunityCategorizationService {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -532,7 +532,7 @@ impl OpportunityCategorizationService {
         #[cfg(target_arch = "wasm32")]
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
-        let now = std::time::SystemTime::now()
+        let now = now_system_time()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
@@ -598,7 +598,7 @@ impl OpportunityCategorizationService {
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                std::time::SystemTime::now()
+                now_system_time()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64
@@ -645,7 +645,7 @@ impl OpportunityCategorizationService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            user_prefs.updated_at = std::time::SystemTime::now()
+            user_prefs.updated_at = now_system_time()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;

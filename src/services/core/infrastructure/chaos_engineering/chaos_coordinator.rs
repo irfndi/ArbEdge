@@ -1,9 +1,10 @@
 //! Chaos Coordinator Module for Experiment Orchestration
 
 use crate::utils::error::{ArbitrageError, ArbitrageResult};
+use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use worker::Env;
 
 use super::{
@@ -136,7 +137,7 @@ impl ChaosCoordinator {
         let session_id = format!(
             "session-{}-{}",
             experiment_id,
-            SystemTime::now()
+            now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs()
@@ -146,7 +147,7 @@ impl ChaosCoordinator {
             session_id: session_id.clone(),
             experiment_id: experiment_id.clone(),
             current_phase: OrchestrationPhase::Initializing,
-            start_time: SystemTime::now()
+            start_time: now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
