@@ -1,4 +1,5 @@
 // use worker::{Request, Response, Env}; // TODO: Re-enable when implementing worker integration [Tracked: PR-24, Comment 94]
+use crate::utils::time::now_instant;
 use crate::{
     services::{
         core::{
@@ -430,7 +431,7 @@ impl AiExchangeRouterService {
         request: &AiAnalysisRequest,
         response: &AiAnalysisResponse,
     ) -> ArbitrageResult<()> {
-        let start_time = std::time::Instant::now();
+        let start_time = now_instant();
 
         let provider_name = match ai_provider {
             AiProvider::OpenAI { .. } => "OpenAI",

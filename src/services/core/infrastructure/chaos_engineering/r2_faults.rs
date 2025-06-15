@@ -10,8 +10,9 @@
 use crate::utils::error::{ArbitrageError, ArbitrageResult, ErrorKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
-use std::time::{Duration, Instant};
+use crate::utils::time::{now_instant, WasmInstant};
 use worker::Env;
 
 use super::{ChaosEngineeringConfig, FaultConfig};
@@ -106,7 +107,7 @@ struct R2FaultState {
     fault_id: String,
     fault_config: FaultConfig,
     params: R2FaultParams,
-    activated_at: Instant,
+    activated_at: WasmInstant,
     stats: R2FaultStats,
     concurrent_requests: u32,
 }
@@ -168,7 +169,7 @@ impl R2FaultInjector {
             fault_id: fault_id.to_string(),
             fault_config: fault_config.clone(),
             params,
-            activated_at: Instant::now(),
+            activated_at: now_instant(),
             stats: R2FaultStats::default(),
             concurrent_requests: 0,
         };

@@ -1,7 +1,8 @@
 //! Recovery Verifier Module for Chaos Engineering
 
+use crate::utils::time::now_instant;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::UNIX_EPOCH;
 
 use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
@@ -168,7 +169,7 @@ impl RecoveryVerifier {
             ));
         }
 
-        let verification_start = Instant::now();
+        let verification_start = now_instant();
 
         let mut result = self
             .active_verifications
@@ -225,7 +226,7 @@ impl RecoveryVerifier {
         let current_timestamp = Self::current_timestamp_seconds();
 
         for endpoint in &self.config.service_endpoints {
-            let check_start = Instant::now();
+            let check_start = now_instant();
 
             let health_check = match self.execute_health_check(endpoint, env).await {
                 Ok((status_code, response_time)) => ServiceHealthCheck {
@@ -260,7 +261,7 @@ impl RecoveryVerifier {
         _endpoint: &str,
         _env: &Env,
     ) -> ArbitrageResult<(u16, f64)> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         // In production, this would make actual HTTP requests
         // For now, simulate health check behavior based on endpoint patterns
@@ -559,7 +560,7 @@ impl RecoveryVerifier {
     /// Get current timestamp in seconds
     fn current_timestamp_seconds() -> u64 {
         now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
     }

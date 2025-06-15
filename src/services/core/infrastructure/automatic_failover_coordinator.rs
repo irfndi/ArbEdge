@@ -19,18 +19,15 @@ use crate::services::core::infrastructure::failover_service::{
 use crate::services::core::infrastructure::monitoring_module::alert_manager::AlertManager;
 use crate::services::core::infrastructure::monitoring_module::real_time_health_monitor::RealTimeHealthMonitor;
 use crate::services::core::infrastructure::monitoring_module::service_degradation_alerting::ServiceDegradationAlerting;
+use crate::utils::time::{now_instant, WasmInstant};
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::Notify;
-#[cfg(not(target_arch = "wasm32"))]
-use tokio::time::{Duration, Instant};
-
-#[cfg(target_arch = "wasm32")]
-use std::time::{Duration, Instant};
 
 // WASM-compatible notification type
 #[cfg(target_arch = "wasm32")]
@@ -497,7 +494,7 @@ impl FailoverDecisionEngine {
         monitor: &ActiveMonitor,
         strategy: Option<&FailoverStrategy>,
     ) -> ArbitrageResult<FailoverDecision> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         // Check if automatic failover is enabled
         if !self.feature_flags.enable_automatic_failover {
@@ -712,7 +709,7 @@ impl RecoveryAutomationEngine {
 pub struct RateLimit {
     max_count: u32,
     window: Duration,
-    events: Arc<Mutex<Vec<Instant>>>,
+    events: Arc<Mutex<Vec<WasmInstant>>>,
 }
 
 impl RateLimit {
@@ -726,7 +723,7 @@ impl RateLimit {
 
     /// Check if action is allowed (doesn't consume)
     pub fn check(&self) -> bool {
-        let now = Instant::now();
+        let now = now_instant();
         let mut events = self.events.lock().unwrap();
 
         // Remove old events outside the window
@@ -737,7 +734,7 @@ impl RateLimit {
 
     /// Consume rate limit token
     pub fn consume(&self) {
-        let now = Instant::now();
+        let now = now_instant();
         let mut events = self.events.lock().unwrap();
 
         // Remove old events outside the window

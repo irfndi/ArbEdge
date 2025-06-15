@@ -4,6 +4,7 @@ use crate::utils::now_system_time;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::UNIX_EPOCH;
 
 pub use crate::services::core::analysis::market_analysis::OpportunityType;
 
@@ -46,7 +47,6 @@ pub enum AccountStatus {
     Verified,
     Unverified,
 }
-use std::time::UNIX_EPOCH;
 // UUID is used throughout the file as uuid::Uuid::new_v4()
 // Keeping the full path for clarity
 

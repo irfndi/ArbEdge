@@ -1,6 +1,7 @@
 use crate::utils::now_system_time;
+use crate::utils::time::{now_instant, WasmInstant};
 use std::collections::HashMap;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -180,7 +181,7 @@ pub struct SafetyController {
     #[allow(dead_code)]
     current_traffic_impact: f64,
     circuit_breaker_count: u32,
-    last_safety_check: Instant,
+    last_safety_check: WasmInstant,
     safety_violations: Vec<SafetyViolation>,
 }
 
@@ -906,7 +907,7 @@ impl SafetyController {
             config,
             current_traffic_impact: 0.0,
             circuit_breaker_count: 0,
-            last_safety_check: Instant::now(),
+            last_safety_check: now_instant(),
             safety_violations: Vec::new(),
         }
     }
@@ -943,7 +944,7 @@ impl SafetyController {
     }
 
     async fn perform_safety_check(&mut self) -> ArbitrageResult<()> {
-        let now = Instant::now();
+        let now = now_instant();
         if now.duration_since(self.last_safety_check) < Duration::from_secs(10) {
             return Ok(()); // Only check every 10 seconds
         }

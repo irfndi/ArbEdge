@@ -9,8 +9,9 @@
 use crate::utils::error::{ArbitrageError, ArbitrageResult, ErrorKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
-use std::time::{Duration, Instant};
+use crate::utils::time::{now_instant, WasmInstant};
 use worker::Env;
 
 use super::{ChaosEngineeringConfig, FaultConfig};
@@ -52,7 +53,7 @@ struct KvFaultState {
     fault_id: String,
     fault_config: FaultConfig,
     params: KvFaultParams,
-    activated_at: Instant,
+    activated_at: WasmInstant,
     stats: KvFaultStats,
 }
 
@@ -108,7 +109,7 @@ impl KvFaultInjector {
             fault_id: fault_id.to_string(),
             fault_config: fault_config.clone(),
             params,
-            activated_at: Instant::now(),
+            activated_at: now_instant(),
             stats: KvFaultStats::default(),
         };
 

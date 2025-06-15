@@ -3,6 +3,8 @@
 #[cfg(target_arch = "wasm32")]
 use js_sys::Date;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(target_arch = "wasm32")]
+use web_sys;
 
 /// Service for handling time-related operations.
 /// WASM-compatible implementation using JavaScript Date API
@@ -24,7 +26,7 @@ impl TimeService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            SystemTime::now()
+            now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs()
@@ -40,7 +42,7 @@ impl TimeService {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            SystemTime::now()
+            now_system_time()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64
@@ -71,7 +73,7 @@ pub fn get_current_timestamp() -> u64 {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        SystemTime::now()
+        now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
@@ -87,7 +89,7 @@ pub fn now_millis() -> u64 {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        SystemTime::now()
+        now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64
@@ -103,7 +105,7 @@ pub fn now_secs() -> u64 {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        SystemTime::now()
+        now_system_time()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
@@ -141,6 +143,59 @@ pub fn system_time_to_secs(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_secs()
+}
+
+/// WASM-compatible Instant alternative for measuring elapsed time
+/// Uses high-resolution timestamp for performance measurements
+#[derive(Debug, Clone, Copy)]
+pub struct WasmInstant {
+    timestamp_ms: f64,
+}
+
+impl WasmInstant {
+    /// Create a new WasmInstant representing the current time
+    /// WASM-compatible using JavaScript performance.now() or Date.now()
+    pub fn now() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Use performance.now() for high-resolution timing in WASM
+            let timestamp_ms = web_sys::window()
+                .and_then(|w| w.performance())
+                .map(|p| p.now())
+                .unwrap_or_else(|| Date::now());
+
+            WasmInstant { timestamp_ms }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Use system time for native builds
+            let timestamp_ms = now_system_time()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as f64;
+
+            WasmInstant { timestamp_ms }
+        }
+    }
+
+    /// Calculate the duration elapsed since this instant
+    pub fn elapsed(&self) -> Duration {
+        let now = Self::now();
+        let elapsed_ms = now.timestamp_ms - self.timestamp_ms;
+        Duration::from_millis(elapsed_ms.max(0.0) as u64)
+    }
+
+    /// Calculate the duration between two instants
+    pub fn duration_since(&self, earlier: WasmInstant) -> Duration {
+        let elapsed_ms = self.timestamp_ms - earlier.timestamp_ms;
+        Duration::from_millis(elapsed_ms.max(0.0) as u64)
+    }
+}
+
+/// WASM-compatible instant function for measuring elapsed time
+/// Use this instead of std::time::Instant::now() for WASM compatibility
+pub fn now_instant() -> WasmInstant {
+    WasmInstant::now()
 }
 
 impl Default for TimeService {

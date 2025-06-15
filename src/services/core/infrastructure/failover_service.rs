@@ -15,6 +15,7 @@ use crate::services::core::infrastructure::monitoring_module::health_monitor::{
     ComponentHealth, HealthMonitor,
 };
 use crate::services::core::infrastructure::UnifiedHealthCheckConfig;
+
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -675,7 +676,7 @@ impl FailoverService {
         };
 
         // Try operation with circuit breaker protection
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
         let result = if self.config.circuit_breaker_integration {
             if let Some(cb_service) = &self.circuit_breaker_service {
                 let cb_id = format!("failover_{}", strategy_id);

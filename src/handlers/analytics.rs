@@ -3,6 +3,7 @@ use crate::responses::ApiResponse;
 use crate::services;
 use crate::utils::now_system_time;
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use worker::{Env, Request, Response, Result};
 
 /// Get dashboard analytics for authenticated user
@@ -58,7 +59,7 @@ pub async fn handle_api_get_dashboard_analytics(req: Request, env: Env) -> Resul
                             "expires_at": profile.subscription.expires_at
                         },
                         "timestamp": now_system_time()
-                            .duration_since(std::time::UNIX_EPOCH)
+                            .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()
                     });

@@ -9,6 +9,7 @@ use crate::utils::now_system_time;
 use log;
 use std::collections::HashMap;
 use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
 use serde_json::Value;
 /// Service for managing AI access levels, usage tracking, and template management
@@ -509,11 +510,11 @@ impl AIAccessService {
                 created_by: None,
                 is_system_default: true,
                 created_at: now_system_time()
-                    .duration_since(std::time::UNIX_EPOCH)
+                    .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs(),
                 updated_at: now_system_time()
-                    .duration_since(std::time::UNIX_EPOCH)
+                    .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs(),
             };

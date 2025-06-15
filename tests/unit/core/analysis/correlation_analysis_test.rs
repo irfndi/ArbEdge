@@ -96,7 +96,7 @@ fn create_test_user_preferences(trading_focus: TradingFocus) -> UserTradingPrefe
     #[cfg(target_arch = "wasm32")]
     let now = js_sys::Date::now() as u64;
     #[cfg(not(target_arch = "wasm32"))]
-    let now = std::time::SystemTime::now()
+    let now = arb_edge::utils::time::now_system_time()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;

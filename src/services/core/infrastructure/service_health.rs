@@ -4,10 +4,11 @@
 use crate::services::core::infrastructure::UnifiedHealthCheckConfig;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 
+use crate::utils::time::{now_instant, WasmInstant};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // WASM-specific imports
 #[cfg(target_arch = "wasm32")]
@@ -96,7 +97,7 @@ pub struct ServiceHealthManager {
     services: HashMap<String, Box<dyn HealthCheckable + Send + Sync>>,
     metrics: Arc<std::sync::Mutex<HashMap<String, ServiceMetrics>>>,
     last_health_report: Arc<std::sync::Mutex<Option<SystemHealthReport>>>,
-    start_time: Instant,
+    start_time: WasmInstant,
 }
 
 impl ServiceHealthManager {
@@ -107,7 +108,7 @@ impl ServiceHealthManager {
             services: HashMap::new(),
             metrics: Arc::new(std::sync::Mutex::new(HashMap::new())),
             last_health_report: Arc::new(std::sync::Mutex::new(None)),
-            start_time: Instant::now(),
+            start_time: now_instant(),
         }
     }
 
@@ -118,7 +119,7 @@ impl ServiceHealthManager {
             services: HashMap::new(),
             metrics: Arc::new(std::sync::Mutex::new(HashMap::new())),
             last_health_report: Arc::new(std::sync::Mutex::new(None)),
-            start_time: Instant::now(),
+            start_time: now_instant(),
         }
     }
 
@@ -159,7 +160,7 @@ impl ServiceHealthManager {
             ArbitrageError::validation_error(format!("Service not found: {}", service_name))
         })?;
 
-        let start_time = Instant::now();
+        let start_time = now_instant();
         let mut check_result = None;
         let mut last_error = None;
 

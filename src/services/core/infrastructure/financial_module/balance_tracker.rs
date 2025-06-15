@@ -18,6 +18,8 @@ use crate::services::core::infrastructure::database_repositories::utils::databas
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::UNIX_EPOCH;
+
 use worker::{kv::KvStore, D1Database, Env};
 
 /// Helper function to get current time in milliseconds as u64
@@ -30,7 +32,7 @@ fn get_current_time_millis() -> u64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
         crate::utils::now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64
     }

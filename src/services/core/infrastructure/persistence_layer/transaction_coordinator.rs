@@ -5,11 +5,12 @@
 //! monitoring, deadlock detection, and recovery mechanisms.
 
 use crate::utils::error::{ArbitrageError, ArbitrageResult};
+use crate::utils::time::now_instant;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use uuid::Uuid;
 use worker::Env;
 
@@ -462,7 +463,7 @@ impl TransactionCoordinator {
 
     /// Commit transaction
     pub async fn commit_transaction(&self, env: &Env, transaction_id: &str) -> ArbitrageResult<()> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         // Update transaction state to committing
         {
@@ -544,7 +545,7 @@ impl TransactionCoordinator {
         env: &Env,
         transaction_id: &str,
     ) -> ArbitrageResult<()> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         // Update transaction state to rolling back
         {

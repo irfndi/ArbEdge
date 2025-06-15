@@ -4,6 +4,7 @@
 //! with transparent middleware for automatic compression handling
 
 use super::config::{CompressionAlgorithm, CompressionConfig};
+
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
@@ -57,7 +58,7 @@ impl CompressionMiddleware {
 
     /// Process data for storage (compress if beneficial)
     pub async fn process_for_storage(&self, key: &str, data: &str) -> ArbitrageResult<StorageData> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
 
         if !self.config.enabled {
             return Ok(StorageData {
@@ -169,7 +170,7 @@ impl CompressionMiddleware {
         key: &str,
         stored_data: &str,
     ) -> ArbitrageResult<String> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
 
         // Try to detect if data is compressed by checking for compression envelope
         if let Ok(envelope) = serde_json::from_str::<CompressionEnvelope>(stored_data) {

@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(mock_db.get_query_count(), initial_count + 10);
 
         // Test query performance tracking
-        let start_time = std::time::Instant::now();
+        let start_time = arb_edge::utils::time::now_instant();
         let result = mock_db
             .mock_execute_query("SELECT * FROM performance_test", &[])
             .await;

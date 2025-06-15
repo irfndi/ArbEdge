@@ -8,11 +8,11 @@ use crate::services::core::infrastructure::monitoring_module::{
     alert_manager::{AlertCondition, AlertManager, AlertRule, AlertSeverity},
     real_time_health_monitor::{RealTimeHealthMonitor, StorageHealthMetrics, StorageSystemType},
 };
+use crate::utils::time::now_instant;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use worker::kv::KvStore;
 
 /// Service degradation alerting configuration
@@ -367,7 +367,7 @@ impl ServiceDegradationAlerting {
             return Ok(Vec::new());
         }
 
-        let start_time = Instant::now();
+        let start_time = now_instant();
         let mut generated_alerts = Vec::new();
 
         // Update analysis timestamp

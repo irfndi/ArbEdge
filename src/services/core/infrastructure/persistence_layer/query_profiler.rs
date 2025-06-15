@@ -7,8 +7,8 @@ use crate::utils::error::{ArbitrageError, ArbitrageResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::utils::time::{now_instant, WasmInstant};
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::performance_monitor::{
     DatabaseType, ErrorCategory, IndexUsage, PerformanceMonitor, PlanNode, QueryError,
@@ -57,7 +57,7 @@ pub struct QueryContext {
     /// Database type being queried
     pub database_type: DatabaseType,
     /// Query start time
-    pub start_time: Instant,
+    pub start_time: WasmInstant,
     /// Query start timestamp
     pub started_at: DateTime<Utc>,
     /// Caller context (function name, line, etc.)
@@ -125,7 +125,7 @@ impl QueryProfiler {
                 parameters
             },
             database_type,
-            start_time: Instant::now(),
+            start_time: now_instant(),
             started_at: Utc::now(),
             caller_context: None, // TODO: Implement stack trace collection
         };

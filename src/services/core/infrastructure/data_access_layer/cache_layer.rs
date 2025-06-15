@@ -3,6 +3,7 @@
 
 use crate::utils::error::{ArbitrageError, ArbitrageResult};
 use crate::utils::logger::Logger;
+use crate::utils::time::WasmInstant;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,7 +53,7 @@ struct CircuitBreaker {
     state: CircuitBreakerState,
     failure_count: u32,
     success_count: u32,
-    last_failure_time: Option<std::time::Instant>,
+    last_failure_time: Option<WasmInstant>,
     config: CircuitBreakerConfig,
 }
 
@@ -89,7 +90,7 @@ impl CircuitBreaker {
 
     fn record_failure(&mut self) {
         self.failure_count += 1;
-        self.last_failure_time = Some(std::time::Instant::now());
+        self.last_failure_time = Some(crate::utils::time::now_instant());
 
         match self.state {
             CircuitBreakerState::Closed => {
@@ -362,7 +363,7 @@ impl CacheLayer {
 
     /// Get value from cache
     pub async fn get(&self, kv_store: &KvStore, key: &str) -> ArbitrageResult<Option<String>> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
         let full_key = self.build_key(key);
 
         // Check circuit breaker
@@ -429,7 +430,7 @@ impl CacheLayer {
         value: &str,
         ttl: Option<u64>,
     ) -> ArbitrageResult<()> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
         let full_key = self.build_key(key);
         let ttl = ttl.unwrap_or(self.config.default_ttl);
 
@@ -475,7 +476,7 @@ impl CacheLayer {
 
     /// Delete value from cache
     pub async fn delete(&self, kv_store: &KvStore, key: &str) -> ArbitrageResult<()> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
         let full_key = self.build_key(key);
 
         // Check circuit breaker

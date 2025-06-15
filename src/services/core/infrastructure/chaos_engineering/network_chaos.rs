@@ -16,8 +16,9 @@
 //! - 50/1000 subrequests per request (Free/Paid)
 //! - Workers-specific network stack limitations
 
+use crate::utils::time::{now_instant, WasmInstant};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use worker::Env;
@@ -146,7 +147,7 @@ struct NetworkFaultState {
     fault_config: FaultConfig,
     params: NetworkFaultParams,
     stats: NetworkFaultStats,
-    activated_at: Instant,
+    activated_at: WasmInstant,
     connection_count: u32,
     subrequest_count: u32,
 }
@@ -202,7 +203,7 @@ impl NetworkChaosInjector {
             fault_config,
             params,
             stats: NetworkFaultStats::default(),
-            activated_at: Instant::now(),
+            activated_at: now_instant(),
             connection_count: 0,
             subrequest_count: 0,
         };

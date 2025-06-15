@@ -5,6 +5,7 @@ use crate::services::core::admin::SimpleAdminService;
 use crate::types::UserAccessLevel;
 use crate::utils::now_system_time;
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use worker::{console_log, Env, Request, Response, Result};
 
 /// Get admin users statistics
@@ -77,7 +78,7 @@ pub async fn handle_api_admin_get_users(req: Request, env: Env) -> Result<Respon
                             "registrations_this_month": stats.registrations_this_month
                         },
                         "timestamp": now_system_time()
-                            .duration_since(std::time::UNIX_EPOCH)
+                            .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()
                     });
@@ -307,7 +308,7 @@ pub async fn handle_api_admin_update_config(_req: Request, _env: Env) -> Result<
                         "updated": true,
                         "config": updated_config,
                         "timestamp": now_system_time()
-                            .duration_since(std::time::UNIX_EPOCH)
+                            .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()
                     }));

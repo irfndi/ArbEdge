@@ -1,10 +1,11 @@
 // Unified Circuit Breaker System - Consolidates circuit breaker functionality to eliminate duplication
 // Combines features from circuit_breaker_service.rs, cache_layer.rs, and impact_analysis.rs
 
+use crate::utils::time::{now_instant, WasmInstant};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::utils::{ArbitrageError, ArbitrageResult};
 
@@ -205,14 +206,14 @@ pub struct UnifiedCircuitBreaker {
     state: UnifiedCircuitBreakerState,
     failure_count: u32,
     success_count: u32,
-    last_failure_time: Option<Instant>,
-    last_success_time: Option<Instant>,
-    last_state_change: Instant,
+    last_failure_time: Option<WasmInstant>,
+    last_success_time: Option<WasmInstant>,
+    last_state_change: WasmInstant,
     total_requests: u64,
     total_failures: u64,
     total_successes: u64,
     degraded_mode_active: bool,
-    degraded_mode_start_time: Option<Instant>,
+    degraded_mode_start_time: Option<WasmInstant>,
     metadata: HashMap<String, String>,
 }
 
@@ -228,7 +229,7 @@ impl UnifiedCircuitBreaker {
             success_count: 0,
             last_failure_time: None,
             last_success_time: None,
-            last_state_change: Instant::now(),
+            last_state_change: now_instant(),
             total_requests: 0,
             total_failures: 0,
             total_successes: 0,
@@ -267,7 +268,7 @@ impl UnifiedCircuitBreaker {
     pub fn record_success(&mut self) {
         self.total_requests += 1;
         self.total_successes += 1;
-        self.last_success_time = Some(Instant::now());
+        self.last_success_time = Some(now_instant());
 
         match self.state {
             UnifiedCircuitBreakerState::HalfOpen => {
@@ -290,7 +291,7 @@ impl UnifiedCircuitBreaker {
         self.total_requests += 1;
         self.total_failures += 1;
         self.failure_count += 1;
-        self.last_failure_time = Some(Instant::now());
+        self.last_failure_time = Some(now_instant());
 
         match self.state {
             UnifiedCircuitBreakerState::Closed => {
@@ -309,7 +310,7 @@ impl UnifiedCircuitBreaker {
 
     pub fn force_state(&mut self, state: UnifiedCircuitBreakerState) {
         self.state = state;
-        self.last_state_change = Instant::now();
+        self.last_state_change = now_instant();
         self.failure_count = 0;
         self.success_count = 0;
     }
@@ -317,7 +318,7 @@ impl UnifiedCircuitBreaker {
     pub fn enter_degraded_mode(&mut self) {
         if self.config.enable_degraded_mode {
             self.degraded_mode_active = true;
-            self.degraded_mode_start_time = Some(Instant::now());
+            self.degraded_mode_start_time = Some(now_instant());
         }
     }
 
@@ -377,7 +378,7 @@ impl UnifiedCircuitBreaker {
 
     fn transition_to_open(&mut self) {
         self.state = UnifiedCircuitBreakerState::Open;
-        self.last_state_change = Instant::now();
+        self.last_state_change = now_instant();
         self.success_count = 0;
 
         if self.config.enable_degraded_mode {
@@ -387,14 +388,14 @@ impl UnifiedCircuitBreaker {
 
     fn transition_to_half_open(&mut self) {
         self.state = UnifiedCircuitBreakerState::HalfOpen;
-        self.last_state_change = Instant::now();
+        self.last_state_change = now_instant();
         self.success_count = 0;
         self.failure_count = 0;
     }
 
     fn transition_to_closed(&mut self) {
         self.state = UnifiedCircuitBreakerState::Closed;
-        self.last_state_change = Instant::now();
+        self.last_state_change = now_instant();
         self.failure_count = 0;
         self.success_count = 0;
         self.exit_degraded_mode();
@@ -422,7 +423,7 @@ pub struct UnifiedCircuitBreakerStateInfo {
     pub success_rate: f32,
     pub total_requests: u64,
     pub degraded_mode_active: bool,
-    pub last_state_change: Instant,
+    pub last_state_change: WasmInstant,
     pub time_in_current_state: Duration,
 }
 

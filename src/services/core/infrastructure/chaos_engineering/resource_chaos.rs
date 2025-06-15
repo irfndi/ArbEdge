@@ -18,8 +18,9 @@
 //! - CPU time limitations
 //! - Event loop constraints
 
+use crate::utils::time::{now_instant, WasmInstant};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
@@ -172,7 +173,7 @@ struct ResourceChaosState {
     fault_config: FaultConfig,
     params: ResourceChaosParams,
     stats: ResourceChaosStats,
-    activated_at: Instant,
+    activated_at: WasmInstant,
     active_memory_allocations: Vec<Vec<u8>>,
     active_cpu_operations: u32,
     concurrent_operations: u32,
@@ -229,7 +230,7 @@ impl ResourceChaosInjector {
             fault_config,
             params,
             stats: ResourceChaosStats::default(),
-            activated_at: Instant::now(),
+            activated_at: now_instant(),
             active_memory_allocations: Vec::new(),
             active_cpu_operations: 0,
             concurrent_operations: 0,
@@ -594,7 +595,7 @@ impl ResourceChaosInjector {
 
     /// Execute CPU exhaustion simulation
     async fn execute_cpu_exhaustion(duration_ms: u64, intensity: f64) {
-        let start = Instant::now();
+        let start = now_instant();
         let target_duration = Duration::from_millis(duration_ms);
 
         while start.elapsed() < target_duration {
@@ -646,7 +647,7 @@ impl ResourceChaosInjector {
 
     /// Execute event loop blocking (synchronous operation)
     fn execute_event_loop_blocking(block_duration_ms: u64) {
-        let start = Instant::now();
+        let start = now_instant();
         let target_duration = Duration::from_millis(block_duration_ms);
 
         // Busy wait to block the event loop

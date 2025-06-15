@@ -3,6 +3,7 @@ use crate::responses::ApiResponse;
 use crate::services;
 use crate::utils::now_system_time;
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use worker::{Env, Request, Response, Result};
 
 /// AI market analysis endpoint
@@ -61,7 +62,7 @@ pub async fn handle_api_ai_analyze(req: Request, env: Env) -> Result<Response> {
                         "user_id": user_id,
                         "analysis": analysis,
                         "timestamp": now_system_time()
-                            .duration_since(std::time::UNIX_EPOCH)
+                            .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs()
                     });

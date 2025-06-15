@@ -4,11 +4,11 @@ use crate::types::{
     SessionConfig, SessionOutcome,
 };
 use crate::utils::{now_system_time, ArbitrageError, ArbitrageResult};
+use std::time::UNIX_EPOCH;
 
 use serde_json::{self};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
 use worker::console_log;
 use worker::wasm_bindgen::JsValue;
 

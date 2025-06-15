@@ -4,6 +4,7 @@
 use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::UNIX_EPOCH;
 use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
@@ -195,7 +196,7 @@ impl UnifiedAlert {
     ) -> Self {
         let now = now_system_time();
         let now_millis = now
-            .duration_since(SystemTime::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
@@ -284,7 +285,7 @@ impl UnifiedAlert {
         self.notification_count += 1;
         self.last_notification_at = Some(
             now_system_time()
-                .duration_since(SystemTime::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64,
         );
@@ -293,7 +294,7 @@ impl UnifiedAlert {
 
     pub fn duration_seconds(&self) -> u64 {
         let now = now_system_time()
-            .duration_since(SystemTime::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
         (now - self.started_at) / 1000

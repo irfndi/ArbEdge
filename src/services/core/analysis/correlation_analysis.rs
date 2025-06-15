@@ -2,6 +2,8 @@ use crate::utils::{logger::Logger, ArbitrageResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(test)]
+use std::time::UNIX_EPOCH;
 
 use crate::services::core::analysis::market_analysis::{MathUtils, PriceSeries};
 use crate::services::core::infrastructure::data_ingestion_module::DataIngestionModule;
@@ -733,12 +735,13 @@ mod tests {
         correlated_series
     }
 
+    #[cfg(test)]
     #[allow(dead_code)]
     fn create_test_trading_preferences() -> UserTradingPreferences {
         // Helper to get current timestamp as u64
         let now_timestamp = || {
             now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs()
         };

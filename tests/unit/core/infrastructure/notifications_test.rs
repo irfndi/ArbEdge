@@ -908,7 +908,7 @@ mod tests {
         let mut mock_service = MockNotificationService::new();
 
         // Create multiple notifications to test performance
-        let start_time = std::time::Instant::now();
+        let start_time = arb_edge::utils::time::now_instant();
 
         for i in 0..50 {
             let mut variables = HashMap::new();
@@ -943,7 +943,7 @@ mod tests {
         );
 
         // Test delivery performance
-        let delivery_start = std::time::Instant::now();
+        let delivery_start = arb_edge::utils::time::now_instant();
 
         for notification in &mock_service.notifications.clone() {
             let _ = mock_service

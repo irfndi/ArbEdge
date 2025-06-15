@@ -4,11 +4,12 @@
 //! for both D1 database connections and R2 storage access with comprehensive resource management
 
 use crate::utils::now_system_time;
+use crate::utils::time::{now_instant, WasmInstant};
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use worker::{Bucket as R2Bucket, D1Database, Env};
 
 use super::{D1Config, R2Config};
@@ -128,8 +129,8 @@ impl CircuitBreaker {
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
     pub connection_id: String,
-    pub created_at: Instant,
-    pub last_used: Instant,
+    pub created_at: WasmInstant,
+    pub last_used: WasmInstant,
     pub is_healthy: bool,
     pub connection_type: ConnectionType,
     pub usage_count: u64,
@@ -426,7 +427,7 @@ impl ConnectionPool {
 
     /// Create new D1 database connection
     async fn create_d1_connection(&self, env: &Env) -> ArbitrageResult<D1Database> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         match env.d1(&self.d1_config.database_name) {
             Ok(db) => {
@@ -462,7 +463,7 @@ impl ConnectionPool {
 
     /// Create new R2 bucket connection
     async fn create_r2_connection(&self, env: &Env) -> ArbitrageResult<R2Bucket> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         match env.bucket(&self.r2_config.bucket_name) {
             Ok(bucket) => {
@@ -502,13 +503,13 @@ impl ConnectionPool {
         let mut info_map = self.connection_info.lock().unwrap();
 
         if let Some(info) = info_map.get_mut(&connection_id) {
-            info.last_used = Instant::now();
+            info.last_used = now_instant();
             info.usage_count += 1;
         } else {
             let info = ConnectionInfo {
                 connection_id: connection_id.clone(),
-                created_at: Instant::now(),
-                last_used: Instant::now(),
+                created_at: now_instant(),
+                last_used: now_instant(),
                 is_healthy: true,
                 connection_type: conn_type,
                 usage_count: 1,
@@ -540,7 +541,7 @@ impl ConnectionPool {
 
     /// Perform health check on all connections
     pub async fn health_check(&self) -> ArbitrageResult<ConnectionHealth> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         // Check D1 health
         let d1_health = self.check_d1_health().await;
@@ -654,7 +655,7 @@ impl ConnectionPool {
     /// Clean up idle connections
     pub async fn cleanup_idle_connections(&self) -> ArbitrageResult<u32> {
         let idle_timeout = Duration::from_millis(self.config.idle_timeout_ms);
-        let now = Instant::now();
+        let now = now_instant();
         let mut cleaned_count = 0;
 
         // Clean up connection info for idle connections

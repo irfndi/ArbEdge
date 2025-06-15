@@ -8,6 +8,8 @@ use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::UNIX_EPOCH;
+
 // use worker::*; // TODO: Re-enable when implementing worker functionality
 
 /// Required onboarding steps that users must complete
@@ -120,7 +122,7 @@ impl UserTradingPreferences {
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
@@ -165,7 +167,7 @@ impl UserTradingPreferences {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.updated_at = now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
         }
@@ -211,7 +213,7 @@ impl UserTradingPreferences {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.updated_at = now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
         }
@@ -402,7 +404,7 @@ impl UserTradingPreferencesService {
         #[cfg(not(target_arch = "wasm32"))]
         {
             now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64
         }
@@ -494,7 +496,7 @@ impl UserTradingPreferencesService {
         #[cfg(not(target_arch = "wasm32"))]
         {
             preferences.updated_at = now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
         }
@@ -523,7 +525,7 @@ impl UserTradingPreferencesService {
         #[cfg(not(target_arch = "wasm32"))]
         {
             preferences.updated_at = now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
         }
@@ -631,7 +633,7 @@ impl UserTradingPreferencesService {
         #[cfg(not(target_arch = "wasm32"))]
         {
             preferences.updated_at = now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
         }

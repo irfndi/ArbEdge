@@ -530,7 +530,7 @@ mod performance_tests {
         }
 
         // Benchmark session validation
-        let start = std::time::Instant::now();
+        let start = arb_edge::utils::time::now_instant();
 
         for i in 0..1000 {
             let cache_key = format!("session_cache:{}", i);
@@ -573,7 +573,7 @@ mod performance_tests {
         }
 
         // Benchmark opportunity distribution
-        let start = std::time::Instant::now();
+        let start = arb_edge::utils::time::now_instant();
 
         for i in 0..100 {
             let now_bench = chrono::Utc::now().timestamp_millis() as u64;

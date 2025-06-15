@@ -11,10 +11,10 @@ use crate::services::core::infrastructure::monitoring_module::health_monitor::{
 use crate::services::core::infrastructure::persistence_layer::PerformanceMonitor;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 
+use crate::utils::time::now_instant;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use worker::kv::KvStore;
 
 /// Real-time health monitoring configuration
@@ -287,7 +287,7 @@ impl RealTimeHealthMonitor {
 
     /// Perform health checks on all enabled storage systems
     pub async fn check_all_systems(&self) -> ArbitrageResult<HealthDashboardData> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
 
         // Update last health check time
         {
@@ -325,7 +325,7 @@ impl RealTimeHealthMonitor {
     /// Check KV store health
     async fn check_kv_store(&self) -> ArbitrageResult<()> {
         let operation_id = uuid::Uuid::new_v4().to_string();
-        let start_time = Instant::now();
+        let start_time = now_instant();
         let started_at = chrono::Utc::now().timestamp_millis() as u64;
 
         let mut operation = HealthCheckOperation {
@@ -412,7 +412,7 @@ impl RealTimeHealthMonitor {
     /// Check D1 database health
     async fn check_d1_database(&self) -> ArbitrageResult<()> {
         let operation_id = uuid::Uuid::new_v4().to_string();
-        let start_time = Instant::now();
+        let start_time = now_instant();
         let started_at = chrono::Utc::now().timestamp_millis() as u64;
 
         let mut operation = HealthCheckOperation {
@@ -473,7 +473,7 @@ impl RealTimeHealthMonitor {
     /// Check R2 storage health
     async fn check_r2_storage(&self) -> ArbitrageResult<()> {
         let operation_id = uuid::Uuid::new_v4().to_string();
-        let start_time = Instant::now();
+        let start_time = now_instant();
         let started_at = chrono::Utc::now().timestamp_millis() as u64;
 
         let mut operation = HealthCheckOperation {

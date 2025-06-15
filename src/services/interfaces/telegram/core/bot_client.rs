@@ -9,11 +9,12 @@
 //! - Rate limiting
 
 use crate::services::core::infrastructure::UnifiedRetryConfig;
+use crate::utils::time::WasmInstant;
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use worker::console_log;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,15 +39,15 @@ pub type RetryConfig = UnifiedRetryConfig;
 
 #[derive(Debug, Clone)]
 pub struct RateLimitEntry {
-    pub last_request: Instant,
+    pub last_request: WasmInstant,
     pub request_count: u32,
-    pub window_start: Instant,
+    pub window_start: WasmInstant,
 }
 
 #[derive(Debug, Clone)]
 pub struct CacheEntry<T> {
     pub value: T,
-    pub expires_at: Instant,
+    pub expires_at: WasmInstant,
 }
 
 /// Telegram Bot API Client

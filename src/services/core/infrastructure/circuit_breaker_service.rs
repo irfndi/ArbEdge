@@ -14,6 +14,7 @@ use crate::services::core::infrastructure::monitoring_module::health_monitor::{
     ComponentHealth, HealthMonitor,
 };
 use crate::services::core::infrastructure::shared_types::{CircuitBreaker, CircuitBreakerState};
+
 use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -542,7 +543,7 @@ impl CircuitBreakerService {
                 .map_err(|e| ArbitrageError::api_error(format!("Operation failed: {}", e)));
         }
 
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
 
         // Get circuit breaker
         let can_execute = {

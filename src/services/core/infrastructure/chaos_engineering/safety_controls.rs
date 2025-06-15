@@ -4,6 +4,7 @@ use crate::utils::error::{ArbitrageError, ArbitrageResult};
 use crate::utils::now_system_time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::UNIX_EPOCH;
 use worker::Env;
 
 use super::ChaosEngineeringConfig;
@@ -154,7 +155,7 @@ impl SafetyController {
     ) -> ArbitrageResult<Vec<SafetyViolation>> {
         let mut violations = Vec::new();
         let current_time = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 

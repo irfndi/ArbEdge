@@ -2,6 +2,8 @@
 // Compatible with existing DataCoordinator and cache_layer.rs architecture
 
 use crate::utils::error::{ArbitrageError, ArbitrageResult};
+use crate::utils::time::WasmInstant;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -260,7 +262,7 @@ impl KvCacheManager {
     /// Get value from cache with automatic tier management
     /// Compatible with DataCoordinator's cache operations
     pub async fn get(&self, kv_store: &KvStore, key: &str) -> ArbitrageResult<Option<String>> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
 
         // Try to determine data type from key pattern
         let data_type = self.infer_data_type(key);
@@ -333,7 +335,7 @@ impl KvCacheManager {
         value: &str,
         ttl: Option<u64>,
     ) -> ArbitrageResult<()> {
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
 
         // Determine data type and optimal tier
         let data_type = self.infer_data_type(key);
@@ -869,12 +871,7 @@ impl KvCacheManager {
     }
 
     /// Record cache hit in metrics
-    async fn record_hit(
-        &self,
-        data_type: &DataType,
-        tier: CacheTier,
-        start_time: std::time::Instant,
-    ) {
+    async fn record_hit(&self, data_type: &DataType, tier: CacheTier, start_time: WasmInstant) {
         let latency_ms = start_time.elapsed().as_millis() as f64;
 
         if let Ok(mut metrics) = self.metrics.lock() {
@@ -902,7 +899,7 @@ impl KvCacheManager {
     }
 
     /// Record cache miss in metrics
-    async fn record_miss(&self, data_type: &DataType, start_time: std::time::Instant) {
+    async fn record_miss(&self, data_type: &DataType, start_time: WasmInstant) {
         let latency_ms = start_time.elapsed().as_millis() as f64;
 
         if let Ok(mut metrics) = self.metrics.lock() {
@@ -926,7 +923,7 @@ impl KvCacheManager {
         &self,
         data_type: &DataType,
         tier: CacheTier,
-        start_time: std::time::Instant,
+        start_time: WasmInstant,
     ) {
         let latency_ms = start_time.elapsed().as_millis() as f64;
 
@@ -953,7 +950,7 @@ impl KvCacheManager {
         &self,
         data_type: &DataType,
         error: &ArbitrageError,
-        start_time: std::time::Instant,
+        start_time: WasmInstant,
     ) {
         let latency_ms = start_time.elapsed().as_millis() as f64;
 
@@ -1027,7 +1024,7 @@ impl KvCacheManager {
             return Ok(0);
         }
 
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
         let mut successful_warmings = 0;
 
         let warming_count = warming_requests.len();

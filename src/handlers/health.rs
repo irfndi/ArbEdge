@@ -1,6 +1,7 @@
 use crate::responses::ApiResponse;
 use crate::services;
 use crate::utils::now_system_time;
+use std::time::UNIX_EPOCH;
 use worker::{Env, Request, Response, Result};
 
 /// Basic health check endpoint
@@ -24,7 +25,7 @@ pub async fn handle_api_detailed_health_check(_req: Request, env: Env) -> Result
                     // Validate that the health check key contains recent timestamp
                     if let Ok(timestamp) = value.parse::<u64>() {
                         let now = now_system_time()
-                            .duration_since(std::time::UNIX_EPOCH)
+                            .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs();
                         // Health check key should be updated within last 5 minutes (300 seconds)
@@ -68,7 +69,7 @@ pub async fn handle_api_detailed_health_check(_req: Request, env: Env) -> Result
 
     // Use consistent SystemTime for timestamp
     let timestamp = now_system_time()
-        .duration_since(std::time::UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
@@ -90,7 +91,7 @@ pub async fn handle_api_detailed_health_check(_req: Request, env: Env) -> Result
 pub async fn update_health_check_key(env: &Env) -> Result<()> {
     if let Ok(kv) = env.kv("ArbEdgeKV") {
         let timestamp = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 

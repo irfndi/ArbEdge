@@ -1,6 +1,6 @@
 use arb_edge::types::*;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 /// Task 25.7: Comprehensive Integration Tests for Data Integrity
 /// This test validates real data flows, UX requirements, and system behavior
@@ -31,7 +31,7 @@ async fn test_task_25_7_data_integrity_comprehensive() {
 async fn test_opportunity_data_structure() {
     println!("📊 Testing Opportunity Data Structure");
 
-    let current_timestamp = SystemTime::now()
+    let current_timestamp = arb_edge::utils::time::now_system_time()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
@@ -158,7 +158,7 @@ async fn test_opportunity_data_structure() {
 async fn test_user_profile_structure() {
     println!("👤 Testing User Profile Data Structure");
 
-    let current_timestamp = SystemTime::now()
+    let current_timestamp = arb_edge::utils::time::now_system_time()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
@@ -345,7 +345,7 @@ async fn test_user_profile_structure() {
 async fn test_data_deduplication() {
     println!("🔄 Testing Data Deduplication Logic");
 
-    let _current_timestamp = SystemTime::now()
+    let _current_timestamp = arb_edge::utils::time::now_system_time()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();

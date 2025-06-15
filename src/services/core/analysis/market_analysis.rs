@@ -11,6 +11,8 @@ use crate::utils::now_system_time;
 use crate::utils::{logger::Logger, ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::UNIX_EPOCH;
+
 use uuid::Uuid;
 // use worker::*; // TODO: Re-enable when implementing worker functionality
 
@@ -42,7 +44,7 @@ impl PriceSeries {
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
@@ -71,7 +73,7 @@ impl PriceSeries {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.last_updated = now_system_time()
-                .duration_since(std::time::UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
         }
@@ -592,7 +594,7 @@ impl MarketAnalysisService {
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
@@ -660,7 +662,7 @@ impl MarketAnalysisService {
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
@@ -1044,7 +1046,7 @@ impl MarketAnalysisService {
         let now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 

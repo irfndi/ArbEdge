@@ -599,7 +599,7 @@ impl CoreServiceArchitecture {
 
                         // Perform health check
                         let health_result = {
-                            let start_time = std::time::Instant::now();
+                            let start_time = crate::utils::time::now_instant();
 
                             let is_healthy = match service_type_clone {
                                 ServiceType::TelegramService => true,

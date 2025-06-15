@@ -148,7 +148,7 @@ impl KvKeyBuilder {
     /// Add timestamp component for uniqueness in metrics and time-series data
     pub fn add_timestamp_component(mut self) -> Self {
         let timestamp = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         self.components.push(timestamp.to_string());

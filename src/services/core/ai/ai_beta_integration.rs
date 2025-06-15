@@ -5,6 +5,7 @@ use crate::utils::{ArbitrageError, ArbitrageResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 
 /// AI Enhancement Types
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -361,7 +362,7 @@ impl AiBetaIntegrationService {
         let _now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let _now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
@@ -420,7 +421,7 @@ impl AiBetaIntegrationService {
         let _now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let _now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 
@@ -786,7 +787,7 @@ impl AiBetaIntegrationService {
         let _now = js_sys::Date::now() as u64;
         #[cfg(not(target_arch = "wasm32"))]
         let _now = now_system_time()
-            .duration_since(std::time::UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
 

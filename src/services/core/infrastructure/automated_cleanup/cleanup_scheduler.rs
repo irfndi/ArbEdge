@@ -5,12 +5,12 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use crate::utils::time::{now_instant, WasmInstant};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{interval, sleep, Instant};
 use worker::Env;
 
 use crate::services::core::infrastructure::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
@@ -348,7 +348,7 @@ impl CleanupScheduler {
 
     /// Execute a specific cleanup policy
     async fn execute_policy(&self, policy: &CleanupPolicy, _env: &Env) -> ArbitrageResult<CleanupResult> {
-        let start_time = Instant::now();
+        let start_time = now_instant();
         let execution_start = Utc::now();
 
         // Increment active operations counter

@@ -2,6 +2,7 @@
 // Consolidates caching logic from multiple services with optimized patterns for high concurrency
 
 use crate::utils::error::{ArbitrageError, ArbitrageResult};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -464,7 +465,7 @@ impl CacheManager {
             symbol
         );
 
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
         let api_data = fetch_fn.await?;
         let latency_ms = start_time.elapsed().as_millis() as f64;
 

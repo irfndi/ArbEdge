@@ -476,7 +476,7 @@ mod performance_simulation_tests {
         }
 
         // Act - Simulate processing pipeline
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
 
         // Filter high confidence opportunities
         let high_conf_opps: Vec<_> = opportunities
@@ -515,12 +515,12 @@ mod performance_simulation_tests {
     #[test]
     fn test_price_series_performance() {
         // Arrange - Create large price series
-        let start_time = std::time::Instant::now();
+        let start_time = crate::utils::time::now_instant();
         let series = create_test_price_series("BTCUSDT", "binance", 1000);
         let creation_time = start_time.elapsed();
 
         // Act - Perform operations on the series
-        let operation_start = std::time::Instant::now();
+        let operation_start = crate::utils::time::now_instant();
         let latest_price = series.latest_price();
         let price_values = series.price_values();
         let price_range = series.price_range(
