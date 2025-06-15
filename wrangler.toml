@@ -96,6 +96,16 @@ class_name = "OpportunityCoordinatorDO"
 name = "USER_OPPORTUNITY_QUEUE"
 class_name = "UserOpportunityQueueDO"
 
+# Durable Objects Migrations
+[[migrations]]
+tag = "v1"
+new_classes = [
+  "MarketDataCoordinatorDO",
+  "GlobalRateLimiterDO",
+  "OpportunityCoordinatorDO",
+  "UserOpportunityQueueDO"
+]
+
 # Legacy binding (keeping for backward compatibility)
 # [[durable_objects.bindings]]
 # name = "PROD_TRADING_SESSION"
